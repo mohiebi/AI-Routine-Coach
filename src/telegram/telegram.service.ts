@@ -1346,8 +1346,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   private async ack(ctx: Context) {
-    if ('answerCbQuery' in ctx) {
-      await (ctx as Context & { answerCbQuery: () => Promise<void> }).answerCbQuery();
+    // callbackQuery is only present on callback_query updates (inline button taps).
+    // answerCbQuery exists on the prototype for all contexts but throws for non-CB updates.
+    if (ctx.callbackQuery) {
+      await ctx.answerCbQuery();
     }
   }
 
