@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WeekStartDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum GoalHealthStatus {
+  OFF_TRACK
+  AT_RISK
+  ON_TRACK
+  EXCELLENT
+}
+
+enum RoutineFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum TaskStatus {
+  PENDING
+  COMPLETED
+  SKIPPED
+  FAILED
+}
+
+enum NotificationType {
+  MORNING_REMINDER
+  EVENING_CHECK_IN
+  WEEKLY_REVIEW
+  MONTHLY_REVIEW
+  DAILY_TASK_GENERATION
+}
+
+model User {
+  id                   String            @id @default(uuid()) @db.Uuid
+  telegramId           BigInt            @unique
+  username             String?
+  firstName            String?
+  timezone             String            @default("UTC")
+  dailyCompletionStreak Int              @default(0)
+  bestDailyCompletionStreak Int          @default(0)
+  perfectDayStreak     Int               @default(0)
+  bestPerfectDayStreak Int               @default(0)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  deletedAt            DateTime?
+  preference           UserPreference?
+  goals                Goal[]
+  routines             Routine[]
+  dailyTasks           DailyTask[]
+  taskCompletions      TaskCompletion[]
+  dailyCheckIns        DailyCheckIn[]
+  weeklyReviews        WeeklyReview[]
+  monthlyReviews       MonthlyReview[]
+  notificationLogs     NotificationLog[]
+
+  @@index([deletedAt])
+}
+
+model UserPreference {
+  id                   String       @id @default(uuid()) @db.Uuid
+  userId               String       @unique @db.Uuid
+  timezone             String       @default("UTC")
+  weekStartDay         WeekStartDay @default(MONDAY)
+  morningReminderTime  String       @default("07:00")
+  eveningCheckInTime   String       @default("21:00")
+  weeklyReviewTime     String       @default("20:00")
+  monthlyReviewTime    String       @default("20:00")
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  deletedAt            DateTime?
+  user                 User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([timezone])
+  @@index([deletedAt])
+}
+
+model Goal {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @db.Uuid
+  title          String
+  description    String?
+  category       String?
+  startDate      DateTime
+  targetDate     DateTime?
+  status         GoalStatus       @default(ACTIVE)
+  healthScore    Int              @default(0)
+  healthStatus   GoalHealthStatus @default(OFF_TRACK)
+  currentStreak  Int              @default(0)
+  bestStreak     Int              @default(0)
+  archivedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  deletedAt      DateTime?
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  routines       Routine[]
+  dailyTasks     DailyTask[]
+  weeklyReviews  WeeklyReview[]
+  monthlyReviews MonthlyReview[]
+
+  @@index([userId, status])
+  @@index([deletedAt])
+}
+
+model Routine {
+  id                 String            @id @default(uuid()) @db.Uuid
+  userId             String            @db.Uuid
+  goalId             String            @db.Uuid
+  title              String
+  description        String?
+  frequency          RoutineFrequency
+  targetCount        Int
+  estimatedDuration  Int?
+  isActive           Boolean           @default(true)
+  currentStreak      Int               @default(0)
+  bestStreak         Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  deletedAt          DateTime?
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal               Goal              @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  schedule           RoutineSchedule?
+  dailyTasks         DailyTask[]
+
+  @@index([userId, isActive])
+  @@index([goalId, isActive])
+  @@index([deletedAt])
+}
+
+model RoutineSchedule {
+  id          String           @id @default(uuid()) @db.Uuid
+  routineId   String           @unique @db.Uuid
+  frequency   RoutineFrequency
+  targetCount Int
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+  routine     Routine          @relation(fields: [routineId], references: [id], onDelete: Cascade)
+
+  @@index([deletedAt])
+}
+
+model DailyTask {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @db.Uuid
+  goalId         String           @db.Uuid
+  routineId      String           @db.Uuid
+  date           DateTime
+  status         TaskStatus       @default(PENDING)
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  deletedAt      DateTime?
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal           Goal             @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  routine        Routine          @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  completions    TaskCompletion[]
+
+  @@unique([routineId, date])
+  @@index([userId, date])
+  @@index([goalId, date])
+  @@index([routineId, status])
+  @@index([deletedAt])
+}
+
+model TaskCompletion {
+  id          String     @id @default(uuid()) @db.Uuid
+  userId      String     @db.Uuid
+  dailyTaskId String     @db.Uuid
+  status      TaskStatus
+  note        String?
+  completedAt DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyTask   DailyTask  @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+
+  @@index([userId, completedAt])
+  @@index([dailyTaskId])
+  @@index([deletedAt])
+}
+
+model DailyCheckIn {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  date      DateTime
+  notes     String?
+  obstacles String?
+  wins      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([deletedAt])
+}
+
+model WeeklyReview {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  goalId        String?  @db.Uuid
+  weekStartDate DateTime
+  weekEndDate   DateTime
+  completionRate Float
+  tasksCompleted Int
+  tasksMissed    Int
+  bestRoutineId  String?
+  worstRoutineId String?
+  currentStreak  Int
+  goalHealthScores Json
+  snapshot       Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal           Goal?    @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, weekStartDate])
+  @@index([userId, weekEndDate])
+  @@index([deletedAt])
+}
+
+model MonthlyReview {
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String   @db.Uuid
+  goalId                String?  @db.Uuid
+  monthStartDate         DateTime
+  monthEndDate           DateTime
+  overallCompletionRate  Float
+  totalTasksCompleted    Int
+  totalTasksMissed       Int
+  bestRoutineId          String?
+  worstRoutineId         String?
+  longestStreak          Int
+  goalProgress           Json
+  goalHealthTrends       Json
+  snapshot               Json
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  deletedAt              DateTime?
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal                   Goal?    @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  reflection             MonthlyReflection?
+
+  @@unique([userId, monthStartDate])
+  @@index([userId, monthEndDate])
+  @@index([deletedAt])
+}
+
+model MonthlyReflection {
+  id              String        @id @default(uuid()) @db.Uuid
+  monthlyReviewId String        @unique @db.Uuid
+  wentWell        String?
+  heldBack        String?
+  nextFocus       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  monthlyReview   MonthlyReview @relation(fields: [monthlyReviewId], references: [id], onDelete: Cascade)
+
+  @@index([deletedAt])
+}
+
+model NotificationLog {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  type      NotificationType
+  sentAt    DateTime         @default(now())
+  metadata  Json?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  deletedAt DateTime?
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, sentAt])
+  @@index([deletedAt])
+}
