@@ -38,6 +38,17 @@ export class AiFeatureGateService {
     });
   }
 
+  async isPremium(userId: string): Promise<boolean> {
+    const sub = await this.prisma.userSubscription.findUnique({
+      where: { userId },
+    });
+    return (
+      sub?.plan === SubscriptionPlan.PREMIUM &&
+      sub.status === SubscriptionStatus.ACTIVE &&
+      !sub.deletedAt
+    );
+  }
+
   async ensurePremium(userId: string) {
     const subscription = await this.prisma.userSubscription.findUnique({
       where: { userId },

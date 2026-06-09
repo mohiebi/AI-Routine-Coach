@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
 import { CheckInsModule } from '../check-ins/check-ins.module';
+import { CouponsModule } from '../coupons/coupons.module';
 import { GoalsModule } from '../goals/goals.module';
 import { ProgressModule } from '../progress/progress.module';
 import { ReviewsModule } from '../reviews/reviews.module';
@@ -14,6 +15,7 @@ import { TelegramService } from './telegram.service';
 @Module({
   imports: [
     AiModule,
+    CouponsModule,
     UsersModule,
     GoalsModule,
     RoutinesModule,
