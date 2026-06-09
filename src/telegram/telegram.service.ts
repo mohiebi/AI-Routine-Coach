@@ -736,9 +736,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async handleReview(ctx: Context) {
     const user = await this.ensureTelegramUser(ctx);
-    const review =
-      (await this.reviewsService.latestWeeklyReview(user.id)) ??
-      (await this.reviewsService.generateWeeklyReview(user.id, new Date()));
+    const review = await this.reviewsService.generateWeeklyReview(
+      user.id,
+      new Date(),
+    );
     await ctx.reply(this.formatters.weeklyReview(review));
   }
 

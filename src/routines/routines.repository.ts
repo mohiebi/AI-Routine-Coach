@@ -27,6 +27,7 @@ export class RoutinesRepository {
         userId,
         deletedAt: null,
         ...(includeInactive ? {} : { isActive: true }),
+        goal: { status: 'ACTIVE', deletedAt: null },
       },
       include: { goal: true, schedule: true },
       orderBy: { createdAt: 'desc' },

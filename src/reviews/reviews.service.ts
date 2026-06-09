@@ -21,7 +21,9 @@ export class ReviewsService {
     const range = getWeekRange(date, user.preference.weekStartDay);
     const [tasks, goals] = await Promise.all([
       this.tasksRepository.listBetween(userId, range.start, range.end),
-      this.prisma.goal.findMany({ where: { userId, deletedAt: null } }),
+      this.prisma.goal.findMany({
+        where: { userId, status: 'ACTIVE', deletedAt: null },
+      }),
     ]);
     const metrics = this.reviewMetricsService.buildTaskMetrics(tasks);
     const goalHealthScores = this.reviewMetricsService.goalHealthScores(goals);
@@ -69,7 +71,7 @@ export class ReviewsService {
     const [tasks, goals] = await Promise.all([
       this.tasksRepository.listBetween(userId, range.start, range.end),
       this.prisma.goal.findMany({
-        where: { userId, deletedAt: null },
+        where: { userId, status: 'ACTIVE', deletedAt: null },
         orderBy: { createdAt: 'asc' },
       }),
     ]);

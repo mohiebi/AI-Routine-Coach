@@ -8,7 +8,13 @@ export class TasksRepository {
 
   listForDate(userId: string, date: Date) {
     return this.prisma.dailyTask.findMany({
-      where: { userId, date, deletedAt: null },
+      where: {
+        userId,
+        date,
+        deletedAt: null,
+        routine: { isActive: true, deletedAt: null },
+        goal: { status: 'ACTIVE', deletedAt: null },
+      },
       include: { routine: true, goal: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -20,6 +26,8 @@ export class TasksRepository {
         userId,
         date: { gte: start, lte: end },
         deletedAt: null,
+        routine: { isActive: true, deletedAt: null },
+        goal: { status: 'ACTIVE', deletedAt: null },
       },
       include: { routine: true, goal: true },
     });
@@ -41,7 +49,13 @@ export class TasksRepository {
 
   findForUser(userId: string, taskId: string) {
     return this.prisma.dailyTask.findFirst({
-      where: { id: taskId, userId, deletedAt: null },
+      where: {
+        id: taskId,
+        userId,
+        deletedAt: null,
+        routine: { isActive: true, deletedAt: null },
+        goal: { status: 'ACTIVE', deletedAt: null },
+      },
       include: { routine: true, goal: true },
     });
   }

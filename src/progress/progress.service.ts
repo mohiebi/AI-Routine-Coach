@@ -33,11 +33,16 @@ export class ProgressService {
       monthlyReview,
     ] = await Promise.all([
       this.prisma.goal.findMany({
-        where: { userId, deletedAt: null },
+        where: { userId, status: 'ACTIVE', deletedAt: null },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.routine.findMany({
-        where: { userId, deletedAt: null },
+        where: {
+          userId,
+          isActive: true,
+          deletedAt: null,
+          goal: { status: 'ACTIVE', deletedAt: null },
+        },
         orderBy: { createdAt: 'desc' },
       }),
       this.tasksRepository.listBetween(userId, week.start, week.end),

@@ -18,7 +18,13 @@ export class GoalsRepository {
         ...(includeArchived ? {} : { status: { not: 'ARCHIVED' as const } }),
       },
       orderBy: { createdAt: 'desc' },
-      include: { routines: { where: { deletedAt: null } } },
+      include: {
+        routines: {
+          where: includeArchived
+            ? { deletedAt: null }
+            : { isActive: true, deletedAt: null },
+        },
+      },
     });
   }
 
