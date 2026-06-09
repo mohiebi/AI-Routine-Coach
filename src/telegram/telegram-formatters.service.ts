@@ -63,7 +63,7 @@ export class TelegramFormattersService {
 
   tasks(tasks: (DailyTask & { routine: Routine; goal: Goal })[]) {
     if (tasks.length === 0) {
-      return "No tasks for today.\n\nAdd active routines to your goals to see tasks here.";
+      return 'No tasks for today.\n\nAdd active routines to your goals to see tasks here.';
     }
     return [
       "Today's Tasks:",
@@ -165,7 +165,7 @@ export class TelegramFormattersService {
       '',
       '📋 *Goals* — view goals and add routines',
       '🔄 *Routines* — view all your routines',
-      '✅ *Today* — see and complete today\'s tasks',
+      "✅ *Today* — see and complete today's tasks",
       '📊 *Progress* — streaks, rates, and health scores',
       '📝 *Check In* — record notes, obstacles, and wins',
       '📖 *Review* — your latest weekly review',

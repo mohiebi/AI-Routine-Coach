@@ -12,8 +12,9 @@ export class EnvironmentVariables {
   @IsString()
   DATABASE_URL!: string;
 
+  @IsOptional()
   @IsString()
-  REDIS_HOST!: string;
+  REDIS_HOST?: string;
 
   @IsOptional()
   @IsInt()
@@ -33,8 +34,28 @@ export class EnvironmentVariables {
   PROD_LINK?: string;
 
   @IsOptional()
+  @IsString()
+  VERCEL?: string;
+
+  @IsOptional()
+  @IsString()
+  VERCEL_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  VERCEL_PROJECT_PRODUCTION_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  TELEGRAM_WEBHOOK_SECRET?: string;
+
+  @IsOptional()
   @IsBooleanString()
   TELEGRAM_BOT_ENABLED?: string;
+
+  @IsOptional()
+  @IsBooleanString()
+  SCHEDULER_ENABLED?: string;
 
   @IsOptional()
   @IsInt()
@@ -52,6 +73,15 @@ export function validateEnvironment(config: Record<string, unknown>) {
 
   if (errors.length > 0) {
     throw new Error(errors.toString());
+  }
+
+  const schedulerEnabled =
+    validatedConfig.SCHEDULER_ENABLED === undefined
+      ? validatedConfig.VERCEL !== '1'
+      : validatedConfig.SCHEDULER_ENABLED !== 'false';
+
+  if (schedulerEnabled && !validatedConfig.REDIS_HOST) {
+    throw new Error('REDIS_HOST is required when SCHEDULER_ENABLED is true');
   }
 
   return validatedConfig;

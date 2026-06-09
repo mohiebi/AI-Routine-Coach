@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Headers, Post } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import { TelegramService } from './telegram.service';
 
@@ -9,7 +9,10 @@ export class TelegramController {
 
   @Post('webhook')
   @ApiExcludeEndpoint()
-  handleWebhook(@Body() update: unknown) {
-    return this.telegramService.handleWebhookUpdate(update);
+  handleWebhook(
+    @Body() update: unknown,
+    @Headers('x-telegram-bot-api-secret-token') secretToken?: string,
+  ) {
+    return this.telegramService.handleWebhookUpdate(update, secretToken);
   }
 }

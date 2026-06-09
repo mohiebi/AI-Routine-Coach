@@ -4,9 +4,16 @@ import {
   OnModuleDestroy,
   OnModuleInit,
   ServiceUnavailableException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Goal, Routine, RoutineFrequency, TaskStatus, WeekStartDay } from '@prisma/client';
+import {
+  Goal,
+  Routine,
+  RoutineFrequency,
+  TaskStatus,
+  WeekStartDay,
+} from '@prisma/client';
 import { Context, Markup, Telegraf } from 'telegraf';
 import { Update } from 'telegraf/types';
 import { CheckInsService } from '../check-ins/check-ins.service';
@@ -96,7 +103,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     const enabled =
-      this.configService.get<string>('TELEGRAM_BOT_ENABLED', 'true') !== 'false';
+      this.configService.get<string>('TELEGRAM_BOT_ENABLED', 'true') !==
+      'false';
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     if (!enabled || !token) {
       this.logger.warn('Telegram bot disabled or TELEGRAM_BOT_TOKEN missing');
@@ -105,13 +113,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot = new Telegraf(token);
     this.registerHandlers(this.bot);
-    const prodLink = this.normalizeProdLink(
-      this.configService.get<string>('PROD_LINK'),
-    );
+    const prodLink = this.resolvePublicBaseUrl();
 
     if (prodLink) {
       const webhookUrl = `${prodLink}/telegram/webhook`;
-      await this.bot.telegram.setWebhook(webhookUrl);
+      const secretToken = this.configService.get<string>(
+        'TELEGRAM_WEBHOOK_SECRET',
+      );
+      await this.bot.telegram.setWebhook(
+        webhookUrl,
+        secretToken ? { secret_token: secretToken } : undefined,
+      );
       this.logger.log(`Telegram webhook registered at ${webhookUrl}`);
       return;
     }
@@ -125,7 +137,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       })
       .catch((error: unknown) => {
         const message =
-          error instanceof Error ? error.message : 'Unknown Telegram launch error';
+          error instanceof Error
+            ? error.message
+            : 'Unknown Telegram launch error';
         this.logger.error(`Telegram bot failed to launch: ${message}`);
       });
   }
@@ -136,10 +150,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async handleWebhookUpdate(update: unknown) {
+  async handleWebhookUpdate(update: unknown, secretToken?: string) {
     if (!this.bot) {
       throw new ServiceUnavailableException('Telegram bot is not initialized');
     }
+
+    const expectedSecret = this.configService.get<string>(
+      'TELEGRAM_WEBHOOK_SECRET',
+    );
+    if (expectedSecret && secretToken !== expectedSecret) {
+      throw new UnauthorizedException('Invalid Telegram webhook secret');
+    }
+
     await this.bot.handleUpdate(update as Update);
     return { ok: true };
   }
@@ -185,28 +207,50 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     // Goal management
     bot.action(/^goal:manage:(.+)$/, (ctx) => this.handleGoalManage(ctx));
-    bot.action(/^goal:edit:title:(.+)$/, (ctx) => this.startGoalEdit(ctx, 'title'));
-    bot.action(/^goal:edit:desc:(.+)$/, (ctx) => this.startGoalEdit(ctx, 'desc'));
+    bot.action(/^goal:edit:title:(.+)$/, (ctx) =>
+      this.startGoalEdit(ctx, 'title'),
+    );
+    bot.action(/^goal:edit:desc:(.+)$/, (ctx) =>
+      this.startGoalEdit(ctx, 'desc'),
+    );
     bot.action(/^goal:edit:cat:(.+)$/, (ctx) => this.startGoalEdit(ctx, 'cat'));
-    bot.action(/^goal:edit:date:(.+)$/, (ctx) => this.startGoalEdit(ctx, 'date'));
+    bot.action(/^goal:edit:date:(.+)$/, (ctx) =>
+      this.startGoalEdit(ctx, 'date'),
+    );
     bot.action(/^goal:archive:(.+)$/, (ctx) => this.handleGoalArchive(ctx));
-    bot.action(/^goal:archive_ok:(.+)$/, (ctx) => this.handleGoalArchiveConfirm(ctx));
+    bot.action(/^goal:archive_ok:(.+)$/, (ctx) =>
+      this.handleGoalArchiveConfirm(ctx),
+    );
 
     // Routine creation
     bot.action('new_routine', (ctx) => this.startRoutineCreation(ctx));
     bot.action(/^new_routine:(.+)$/, (ctx) =>
-      this.startRoutineCreationForGoal(ctx, (ctx.match as RegExpExecArray)[1]),
+      this.startRoutineCreationForGoal(ctx, ctx.match[1]),
     );
 
     // Routine management
     bot.action(/^routine:manage:(.+)$/, (ctx) => this.handleRoutineManage(ctx));
-    bot.action(/^routine:edit:title:(.+)$/, (ctx) => this.startRoutineEdit(ctx, 'title'));
-    bot.action(/^routine:edit:desc:(.+)$/, (ctx) => this.startRoutineEdit(ctx, 'desc'));
-    bot.action(/^routine:edit:freq:(.+)$/, (ctx) => this.startRoutineEdit(ctx, 'freq'));
-    bot.action(/^routine:edit:count:(.+)$/, (ctx) => this.startRoutineEdit(ctx, 'count'));
-    bot.action(/^routine:edit:dur:(.+)$/, (ctx) => this.startRoutineEdit(ctx, 'dur'));
-    bot.action(/^routine:archive:(.+)$/, (ctx) => this.handleRoutineArchive(ctx));
-    bot.action(/^routine:archive_ok:(.+)$/, (ctx) => this.handleRoutineArchiveConfirm(ctx));
+    bot.action(/^routine:edit:title:(.+)$/, (ctx) =>
+      this.startRoutineEdit(ctx, 'title'),
+    );
+    bot.action(/^routine:edit:desc:(.+)$/, (ctx) =>
+      this.startRoutineEdit(ctx, 'desc'),
+    );
+    bot.action(/^routine:edit:freq:(.+)$/, (ctx) =>
+      this.startRoutineEdit(ctx, 'freq'),
+    );
+    bot.action(/^routine:edit:count:(.+)$/, (ctx) =>
+      this.startRoutineEdit(ctx, 'count'),
+    );
+    bot.action(/^routine:edit:dur:(.+)$/, (ctx) =>
+      this.startRoutineEdit(ctx, 'dur'),
+    );
+    bot.action(/^routine:archive:(.+)$/, (ctx) =>
+      this.handleRoutineArchive(ctx),
+    );
+    bot.action(/^routine:archive_ok:(.+)$/, (ctx) =>
+      this.handleRoutineArchiveConfirm(ctx),
+    );
 
     // Inline selectors — creation
     bot.action(/^cat:(.+)$/, (ctx) => this.handleCategorySelection(ctx));
@@ -220,16 +264,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.action(/^efreq:(.+)$/, (ctx) => this.handleEditFrequencySelection(ctx));
 
     // Check-in skips
-    bot.action('skip:obstacles', (ctx) => this.skipCheckInStep(ctx, 'obstacles'));
+    bot.action('skip:obstacles', (ctx) =>
+      this.skipCheckInStep(ctx, 'obstacles'),
+    );
     bot.action('skip:wins', (ctx) => this.skipCheckInStep(ctx, 'wins'));
 
     // Settings
     bot.action(/^settings:(.+)$/, (ctx) => this.handleSettingsAction(ctx));
 
     // Navigation shortcuts
-    bot.action('view_goals', (ctx) => { void ctx.answerCbQuery(); return this.handleGoals(ctx); });
-    bot.action('view_routines', (ctx) => { void ctx.answerCbQuery(); return this.handleRoutines(ctx); });
-    bot.action('view_today', (ctx) => { void ctx.answerCbQuery(); return this.handleToday(ctx); });
+    bot.action('view_goals', (ctx) => {
+      void ctx.answerCbQuery();
+      return this.handleGoals(ctx);
+    });
+    bot.action('view_routines', (ctx) => {
+      void ctx.answerCbQuery();
+      return this.handleRoutines(ctx);
+    });
+    bot.action('view_today', (ctx) => {
+      void ctx.answerCbQuery();
+      return this.handleToday(ctx);
+    });
 
     bot.action('cancel', (ctx) => this.handleCancel(ctx));
     bot.on('text', (ctx) => this.handleConversationText(ctx));
@@ -326,12 +381,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const goal = await this.goalsService.find(user.id, goalId);
 
     if (field === 'cat') {
-      this.conversations.set(userId, { step: 'goal_edit:cat', data: { editId: goalId } });
+      this.conversations.set(userId, {
+        step: 'goal_edit:cat',
+        data: { editId: goalId },
+      });
       await ctx.reply(
         `Current category: ${goal.category ?? 'not set'}\n\nChoose a new category:`,
         Markup.inlineKeyboard([
-          CATEGORIES.slice(0, 4).map((c) => Markup.button.callback(c, `ecat:${c}`)),
-          CATEGORIES.slice(4).map((c) => Markup.button.callback(c, `ecat:${c}`)),
+          CATEGORIES.slice(0, 4).map((c) =>
+            Markup.button.callback(c, `ecat:${c}`),
+          ),
+          CATEGORIES.slice(4).map((c) =>
+            Markup.button.callback(c, `ecat:${c}`),
+          ),
           CANCEL_ROW,
         ]),
       );
@@ -346,7 +408,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const currentMap: Record<string, string> = {
       title: goal.title,
       desc: goal.description ?? 'not set',
-      date: goal.targetDate ? goal.targetDate.toISOString().slice(0, 10) : 'not set',
+      date: goal.targetDate
+        ? goal.targetDate.toISOString().slice(0, 10)
+        : 'not set',
     };
     const promptMap: Record<string, string> = {
       title: 'Type the new title:',
@@ -354,7 +418,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       date: 'Type the new target date (YYYY-MM-DD):',
     };
 
-    this.conversations.set(userId, { step: stepMap[field], data: { editId: goalId } });
+    this.conversations.set(userId, {
+      step: stepMap[field],
+      data: { editId: goalId },
+    });
     await ctx.reply(
       `Current: ${currentMap[field]}\n\n${promptMap[field]}`,
       Markup.inlineKeyboard([CANCEL_ROW]),
@@ -384,7 +451,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await this.goalsService.archive(user.id, goalId);
     await ctx.reply('Goal archived.', {
       ...MAIN_KEYBOARD,
-      ...Markup.inlineKeyboard([[Markup.button.callback('View Goals', 'view_goals')]]),
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('View Goals', 'view_goals')],
+      ]),
     });
   }
 
@@ -398,7 +467,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!cat) return;
 
     const user = await this.ensureTelegramUser(ctx);
-    await this.goalsService.update(user.id, state.data.editId, { category: cat });
+    await this.goalsService.update(user.id, state.data.editId, {
+      category: cat,
+    });
     this.conversations.delete(userId);
     const goal = await this.goalsService.find(user.id, state.data.editId);
     await ctx.reply(`Category updated to "${cat}".`, this.goalManageMenu(goal));
@@ -467,9 +538,24 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const id = routine.id;
     return Markup.inlineKeyboard([
       [Markup.button.callback('✏️ Edit Title', `routine:edit:title:${id}`)],
-      [Markup.button.callback('✏️ Edit Description', `routine:edit:desc:${id}`)],
-      [Markup.button.callback('✏️ Change Frequency', `routine:edit:freq:${id}`)],
-      [Markup.button.callback('✏️ Change Target Count', `routine:edit:count:${id}`)],
+      [
+        Markup.button.callback(
+          '✏️ Edit Description',
+          `routine:edit:desc:${id}`,
+        ),
+      ],
+      [
+        Markup.button.callback(
+          '✏️ Change Frequency',
+          `routine:edit:freq:${id}`,
+        ),
+      ],
+      [
+        Markup.button.callback(
+          '✏️ Change Target Count',
+          `routine:edit:count:${id}`,
+        ),
+      ],
       [Markup.button.callback('✏️ Change Duration', `routine:edit:dur:${id}`)],
       [Markup.button.callback('🗑 Archive Routine', `routine:archive:${id}`)],
       [Markup.button.callback('← Back to Routines', 'view_routines')],
@@ -498,7 +584,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const routine = await this.routinesService.find(user.id, routineId);
 
     if (field === 'freq') {
-      this.conversations.set(userId, { step: 'routine_edit:freq', data: { editId: routineId } });
+      this.conversations.set(userId, {
+        step: 'routine_edit:freq',
+        data: { editId: routineId },
+      });
       await ctx.reply(
         `Current frequency: ${routine.frequency}\n\nChoose a new frequency:`,
         Markup.inlineKeyboard([
@@ -523,7 +612,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       title: routine.title,
       desc: routine.description ?? 'not set',
       count: String(routine.targetCount),
-      dur: routine.estimatedDuration ? String(routine.estimatedDuration) : 'not set',
+      dur: routine.estimatedDuration
+        ? String(routine.estimatedDuration)
+        : 'not set',
     };
     const promptMap: Record<string, string> = {
       title: 'Type the new title:',
@@ -532,7 +623,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       dur: 'Type the new duration in minutes (number):',
     };
 
-    this.conversations.set(userId, { step: stepMap[field], data: { editId: routineId } });
+    this.conversations.set(userId, {
+      step: stepMap[field],
+      data: { editId: routineId },
+    });
     await ctx.reply(
       `Current: ${currentMap[field]}\n\n${promptMap[field]}`,
       Markup.inlineKeyboard([CANCEL_ROW]),
@@ -548,7 +642,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await ctx.reply(
       `Archive "${routine.title}"?\n\nThis will deactivate the routine and remove it from daily tasks.`,
       Markup.inlineKeyboard([
-        [Markup.button.callback('Yes, Archive', `routine:archive_ok:${routineId}`)],
+        [
+          Markup.button.callback(
+            'Yes, Archive',
+            `routine:archive_ok:${routineId}`,
+          ),
+        ],
         [Markup.button.callback('Cancel', `routine:manage:${routineId}`)],
       ]),
     );
@@ -562,7 +661,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await this.routinesService.archive(user.id, routineId);
     await ctx.reply('Routine archived.', {
       ...MAIN_KEYBOARD,
-      ...Markup.inlineKeyboard([[Markup.button.callback('View Routines', 'view_routines')]]),
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('View Routines', 'view_routines')],
+      ]),
     });
   }
 
@@ -581,7 +682,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
     this.conversations.delete(userId);
     const routine = await this.routinesService.find(user.id, state.data.editId);
-    await ctx.reply(`Frequency updated to ${freq}.`, this.routineManageMenu(routine));
+    await ctx.reply(
+      `Frequency updated to ${freq}.`,
+      this.routineManageMenu(routine),
+    );
   }
 
   // ── Today's tasks ──────────────────────────────────────────────────────────
@@ -768,8 +872,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply(
           'New Goal — Step 3 of 5\n\nChoose a category:',
           Markup.inlineKeyboard([
-            CATEGORIES.slice(0, 4).map((c) => Markup.button.callback(c, `cat:${c}`)),
-            CATEGORIES.slice(4).map((c) => Markup.button.callback(c, `cat:${c}`)),
+            CATEGORIES.slice(0, 4).map((c) =>
+              Markup.button.callback(c, `cat:${c}`),
+            ),
+            CATEGORIES.slice(4).map((c) =>
+              Markup.button.callback(c, `cat:${c}`),
+            ),
             CANCEL_ROW,
           ]),
         );
@@ -781,7 +889,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       case 'goal:startDate': {
         if (!this.isValidDate(text)) {
-          await ctx.reply('Enter a valid date in YYYY-MM-DD format, e.g. 2026-06-09.');
+          await ctx.reply(
+            'Enter a valid date in YYYY-MM-DD format, e.g. 2026-06-09.',
+          );
           return;
         }
         state.data.startDate = text;
@@ -795,7 +905,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       case 'goal:targetDate': {
         if (!this.isValidDate(text)) {
-          await ctx.reply('Enter a valid date in YYYY-MM-DD format, e.g. 2026-12-31.');
+          await ctx.reply(
+            'Enter a valid date in YYYY-MM-DD format, e.g. 2026-12-31.',
+          );
           return;
         }
         state.data.targetDate = text;
@@ -810,7 +922,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply(
           `Goal created: "${newGoal.title}"\n\nWould you like to add a routine to it?`,
           Markup.inlineKeyboard([
-            [Markup.button.callback('➕ Add Routine', `new_routine:${newGoal.id}`)],
+            [
+              Markup.button.callback(
+                '➕ Add Routine',
+                `new_routine:${newGoal.id}`,
+              ),
+            ],
             [Markup.button.callback('View Goals', 'view_goals')],
           ]),
         );
@@ -819,15 +936,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       // ── Goal editing ───────────────────────────────────────────────────────
       case 'goal_edit:title': {
-        await this.goalsService.update(user.id, state.data.editId, { title: text });
+        await this.goalsService.update(user.id, state.data.editId, {
+          title: text,
+        });
         this.conversations.delete(userId);
         const goal = await this.goalsService.find(user.id, state.data.editId);
-        await ctx.reply(`Title updated to "${text}".`, this.goalManageMenu(goal));
+        await ctx.reply(
+          `Title updated to "${text}".`,
+          this.goalManageMenu(goal),
+        );
         break;
       }
 
       case 'goal_edit:desc': {
-        await this.goalsService.update(user.id, state.data.editId, { description: text });
+        await this.goalsService.update(user.id, state.data.editId, {
+          description: text,
+        });
         this.conversations.delete(userId);
         const goal = await this.goalsService.find(user.id, state.data.editId);
         await ctx.reply('Description updated.', this.goalManageMenu(goal));
@@ -843,10 +967,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           await ctx.reply('Enter a valid date in YYYY-MM-DD format.');
           return;
         }
-        await this.goalsService.update(user.id, state.data.editId, { targetDate: text });
+        await this.goalsService.update(user.id, state.data.editId, {
+          targetDate: text,
+        });
         this.conversations.delete(userId);
         const goal = await this.goalsService.find(user.id, state.data.editId);
-        await ctx.reply(`Target date updated to ${text}.`, this.goalManageMenu(goal));
+        await ctx.reply(
+          `Target date updated to ${text}.`,
+          this.goalManageMenu(goal),
+        );
         break;
       }
 
@@ -913,18 +1042,34 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       // ── Routine editing ────────────────────────────────────────────────────
       case 'routine_edit:title': {
-        await this.routinesService.update(user.id, state.data.editId, { title: text });
+        await this.routinesService.update(user.id, state.data.editId, {
+          title: text,
+        });
         this.conversations.delete(userId);
-        const routine = await this.routinesService.find(user.id, state.data.editId);
-        await ctx.reply(`Title updated to "${text}".`, this.routineManageMenu(routine));
+        const routine = await this.routinesService.find(
+          user.id,
+          state.data.editId,
+        );
+        await ctx.reply(
+          `Title updated to "${text}".`,
+          this.routineManageMenu(routine),
+        );
         break;
       }
 
       case 'routine_edit:desc': {
-        await this.routinesService.update(user.id, state.data.editId, { description: text });
+        await this.routinesService.update(user.id, state.data.editId, {
+          description: text,
+        });
         this.conversations.delete(userId);
-        const routine = await this.routinesService.find(user.id, state.data.editId);
-        await ctx.reply('Description updated.', this.routineManageMenu(routine));
+        const routine = await this.routinesService.find(
+          user.id,
+          state.data.editId,
+        );
+        await ctx.reply(
+          'Description updated.',
+          this.routineManageMenu(routine),
+        );
         break;
       }
 
@@ -938,10 +1083,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           await ctx.reply('Enter a number greater than 0.');
           return;
         }
-        await this.routinesService.update(user.id, state.data.editId, { targetCount: n });
+        await this.routinesService.update(user.id, state.data.editId, {
+          targetCount: n,
+        });
         this.conversations.delete(userId);
-        const routine = await this.routinesService.find(user.id, state.data.editId);
-        await ctx.reply(`Target count updated to ${n}.`, this.routineManageMenu(routine));
+        const routine = await this.routinesService.find(
+          user.id,
+          state.data.editId,
+        );
+        await ctx.reply(
+          `Target count updated to ${n}.`,
+          this.routineManageMenu(routine),
+        );
         break;
       }
 
@@ -955,8 +1108,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           estimatedDuration: mins,
         });
         this.conversations.delete(userId);
-        const routine = await this.routinesService.find(user.id, state.data.editId);
-        await ctx.reply(`Duration updated to ${mins} minutes.`, this.routineManageMenu(routine));
+        const routine = await this.routinesService.find(
+          user.id,
+          state.data.editId,
+        );
+        await ctx.reply(
+          `Duration updated to ${mins} minutes.`,
+          this.routineManageMenu(routine),
+        );
         break;
       }
 
@@ -1150,7 +1309,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await ctx.reply(
       `Routine created: "${routine.title}" — ${routine.frequency}`,
       Markup.inlineKeyboard([
-        [Markup.button.callback('➕ Add Another Routine', `new_routine:${state.data.goalId}`)],
+        [
+          Markup.button.callback(
+            '➕ Add Another Routine',
+            `new_routine:${state.data.goalId}`,
+          ),
+        ],
         [Markup.button.callback("See Today's Tasks", 'view_today')],
       ]),
     );
@@ -1160,7 +1324,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async ack(ctx: Context) {
     if ('answerCbQuery' in ctx) {
-      await (ctx as Context & { answerCbQuery: () => Promise<void> }).answerCbQuery();
+      await (
+        ctx as Context & { answerCbQuery: () => Promise<void> }
+      ).answerCbQuery();
     }
   }
 
@@ -1182,8 +1348,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private normalizeProdLink(prodLink?: string) {
-    if (!prodLink) return undefined;
-    return prodLink.trim().replace(/\/+$/, '');
+  private resolvePublicBaseUrl() {
+    const explicitProdLink = this.configService.get<string>('PROD_LINK');
+    if (explicitProdLink) {
+      return this.normalizePublicUrl(explicitProdLink);
+    }
+
+    const vercelUrl =
+      this.configService.get<string>('VERCEL_PROJECT_PRODUCTION_URL') ??
+      this.configService.get<string>('VERCEL_URL');
+    if (!vercelUrl) return undefined;
+
+    return this.normalizePublicUrl(
+      vercelUrl.startsWith('http') ? vercelUrl : `https://${vercelUrl}`,
+    );
+  }
+
+  private normalizePublicUrl(url: string) {
+    return url.trim().replace(/\/+$/, '');
   }
 }
