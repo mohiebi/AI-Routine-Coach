@@ -6,7 +6,7 @@ export class AppService {
     return {
       status: 'ok',
       service: 'ai-routine-coach-phase-1',
-      aiEnabled: false,
+      aiEnabled: true,
     };
   }
 }

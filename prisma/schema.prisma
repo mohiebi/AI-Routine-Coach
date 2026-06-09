@@ -51,6 +51,51 @@ enum NotificationType {
   DAILY_TASK_GENERATION
 }
 
+enum SubscriptionPlan {
+  FREE
+  PREMIUM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum AIFeature {
+  GOAL_REVIEW
+  GOAL_BREAKDOWN
+  ROUTINE_RECOMMENDATION
+  WEEKLY_COACH
+  MONTHLY_COACH
+  ACCOUNTABILITY_COACH
+  ROUTINE_OPTIMIZATION
+  PROGRESS_INSIGHT
+}
+
+enum AIInteractionStatus {
+  SUCCESS
+  FAILED
+}
+
+enum AIRoutineRecommendationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum AIRoutineOptimizationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum AICoachRole {
+  USER
+  ASSISTANT
+}
+
 model User {
   id                   String            @id @default(uuid()) @db.Uuid
   telegramId           BigInt            @unique
@@ -73,6 +118,18 @@ model User {
   weeklyReviews        WeeklyReview[]
   monthlyReviews       MonthlyReview[]
   notificationLogs     NotificationLog[]
+  subscription         UserSubscription?
+  aiInteractions       AIInteraction[]
+  aiUsageCounters      AIUsageCounter[]
+  aiGoalReviews        AIGoalReview[]
+  aiGoalBreakdowns     AIGoalBreakdown[]
+  aiRoutineRecommendationBatches AIRoutineRecommendationBatch[]
+  aiWeeklyCoachings    AIWeeklyCoaching[]
+  aiMonthlyCoachings   AIMonthlyCoaching[]
+  aiRoutineOptimizations AIRoutineOptimization[]
+  aiProgressInsights   AIProgressInsight[]
+  aiCoachMessages      AICoachMessage[]
+  couponRedemptions    CouponRedemption[]
 
   @@index([deletedAt])
 }
@@ -117,6 +174,9 @@ model Goal {
   dailyTasks     DailyTask[]
   weeklyReviews  WeeklyReview[]
   monthlyReviews MonthlyReview[]
+  aiGoalReviews  AIGoalReview[]
+  aiGoalBreakdowns AIGoalBreakdown[]
+  aiRoutineRecommendationBatches AIRoutineRecommendationBatch[]
 
   @@index([userId, status])
   @@index([deletedAt])
@@ -236,6 +296,7 @@ model WeeklyReview {
   deletedAt      DateTime?
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   goal           Goal?    @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  aiCoaching     AIWeeklyCoaching?
 
   @@unique([userId, weekStartDate])
   @@index([userId, weekEndDate])
@@ -263,6 +324,7 @@ model MonthlyReview {
   user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   goal                   Goal?    @relation(fields: [goalId], references: [id], onDelete: SetNull)
   reflection             MonthlyReflection?
+  aiCoaching             AIMonthlyCoaching?
 
   @@unique([userId, monthStartDate])
   @@index([userId, monthEndDate])
@@ -295,5 +357,244 @@ model NotificationLog {
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, type, sentAt])
+  @@index([deletedAt])
+}
+
+model UserSubscription {
+  id        String             @id @default(uuid()) @db.Uuid
+  userId    String             @unique @db.Uuid
+  plan      SubscriptionPlan   @default(FREE)
+  status    SubscriptionStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  deletedAt DateTime?
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([plan, status])
+  @@index([deletedAt])
+}
+
+model AIUsageCounter {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  feature   AIFeature
+  monthKey  String
+  usedCount Int       @default(0)
+  limit     Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, feature, monthKey])
+  @@index([userId, monthKey])
+  @@index([deletedAt])
+}
+
+model AIInteraction {
+  id               String              @id @default(uuid()) @db.Uuid
+  userId           String              @db.Uuid
+  feature          AIFeature
+  status           AIInteractionStatus
+  promptSummary    Json
+  response         Json?
+  model            String
+  promptTokens     Int                 @default(0)
+  completionTokens Int                 @default(0)
+  estimatedCost    Decimal             @default(0) @db.Decimal(12, 6)
+  errorMessage     String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  deletedAt        DateTime?
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goalReviews      AIGoalReview[]
+  goalBreakdowns   AIGoalBreakdown[]
+  routineRecommendationBatches AIRoutineRecommendationBatch[]
+  weeklyCoachings  AIWeeklyCoaching[]
+  monthlyCoachings AIMonthlyCoaching[]
+  routineOptimizations AIRoutineOptimization[]
+  progressInsights AIProgressInsight[]
+  coachMessages    AICoachMessage[]
+
+  @@index([userId, feature, createdAt])
+  @@index([status, createdAt])
+  @@index([deletedAt])
+}
+
+model AIGoalReview {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @db.Uuid
+  goalId          String        @db.Uuid
+  aiInteractionId String        @db.Uuid
+  clarityScore    Int
+  strengths       Json
+  weaknesses      Json
+  missingElements Json
+  suggestedVersion String
+  acceptedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal            Goal          @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  aiInteraction   AIInteraction @relation(fields: [aiInteractionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, goalId, createdAt])
+  @@index([deletedAt])
+}
+
+model AIGoalBreakdown {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @db.Uuid
+  goalId            String        @db.Uuid
+  aiInteractionId   String        @db.Uuid
+  milestones        Json
+  phases            Json
+  suggestedTimeline Json
+  dependencies      Json
+  successIndicators Json
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal              Goal          @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  aiInteraction     AIInteraction @relation(fields: [aiInteractionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, goalId, createdAt])
+  @@index([deletedAt])
+}
+
+model AIRoutineRecommendationBatch {
+  id              String                        @id @default(uuid()) @db.Uuid
+  userId          String                        @db.Uuid
+  goalId          String                        @db.Uuid
+  aiInteractionId String                        @db.Uuid
+  availableHoursPerWeek Int?
+  recommendations Json
+  status          AIRoutineRecommendationStatus @default(PENDING)
+  acceptedRoutineIds Json?
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
+  deletedAt       DateTime?
+  user            User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal            Goal                          @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  aiInteraction   AIInteraction                 @relation(fields: [aiInteractionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, goalId, status])
+  @@index([deletedAt])
+}
+
+model AIWeeklyCoaching {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @db.Uuid
+  weeklyReviewId  String        @unique @db.Uuid
+  aiInteractionId String        @db.Uuid
+  wins            Json
+  challenges      Json
+  insights        Json
+  recommendations Json
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weeklyReview    WeeklyReview  @relation(fields: [weeklyReviewId], references: [id], onDelete: Cascade)
+  aiInteraction   AIInteraction @relation(fields: [aiInteractionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([deletedAt])
+}
+
+model AIMonthlyCoaching {
+  id                     String        @id @default(uuid()) @db.Uuid
+  userId                 String        @db.Uuid
+  monthlyReviewId         String        @unique @db.Uuid
+  aiInteractionId         String        @db.Uuid
+  strengths               Json
+  weaknesses              Json
+  keyLessons              Json
+  nextMonthPriorities     Json
+  recommendedAdjustments  Json
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  deletedAt               DateTime?
+  user                    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  monthlyReview           MonthlyReview @relation(fields: [monthlyReviewId], references: [id], onDelete: Cascade)
+  aiInteraction           AIInteraction @relation(fields: [aiInteractionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([deletedAt])
+}
+
+model AIRoutineOptimization {
+  id              String                      @id @default(uuid()) @db.Uuid
+  userId          String                      @db.Uuid
+  aiInteractionId String                      @db.Uuid
+  suggestions     Json
+  status          AIRoutineOptimizationStatus @default(PENDING)
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  deletedAt       DateTime?
+  user            User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiInteraction   AIInteraction               @relation(fields: [aiInteractionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([deletedAt])
+}
+
+model AIProgressInsight {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @db.Uuid
+  aiInteractionId String        @db.Uuid
+  summary         String
+  insights        Json
+  opportunities   Json
+  risks           Json
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiInteraction   AIInteraction @relation(fields: [aiInteractionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([deletedAt])
+}
+
+model Coupon {
+  id              String             @id @default(cuid())
+  code            String             @unique
+  discountPercent Int                @default(100)
+  maxUses         Int                @default(1)
+  usedCount       Int                @default(0)
+  expiresAt       DateTime?
+  isActive        Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  redemptions     CouponRedemption[]
+}
+
+model CouponRedemption {
+  id         String   @id @default(cuid())
+  couponId   String
+  userId     String   @db.Uuid
+  redeemedAt DateTime @default(now())
+  coupon     Coupon   @relation(fields: [couponId], references: [id])
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([couponId, userId])
+  @@index([userId])
+}
+
+model AICoachMessage {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  aiInteractionId String?        @db.Uuid
+  role            AICoachRole
+  content         String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiInteraction   AIInteraction? @relation(fields: [aiInteractionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
   @@index([deletedAt])
 }

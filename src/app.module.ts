@@ -4,7 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { AiPortsModule } from './ai/ai-ports.module';
+import { AiModule } from './ai/ai.module';
 import { CheckInsModule } from './check-ins/check-ins.module';
 import { validateEnvironment } from './config/env.validation';
 import { GoalsModule } from './goals/goals.module';
@@ -57,7 +57,7 @@ const schedulerImports = schedulerEnabled
       },
     }),
     PrismaModule,
-    AiPortsModule,
+    AiModule,
     UsersModule,
     GoalsModule,
     RoutinesModule,

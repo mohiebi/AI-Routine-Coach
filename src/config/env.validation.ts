@@ -2,6 +2,7 @@ import { plainToInstance } from 'class-transformer';
 import {
   IsBooleanString,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -61,6 +62,44 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   PORT: number = 3000;
+
+  @IsOptional()
+  @IsString()
+  OPENAI_API_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  OPENAI_MODEL: string = 'gpt-5.4-mini';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  OPENAI_TIMEOUT_MS: number = 20000;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  OPENAI_MAX_RETRIES: number = 2;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  OPENAI_CIRCUIT_FAILURE_THRESHOLD: number = 5;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  OPENAI_CIRCUIT_RESET_MS: number = 60000;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  AI_INPUT_COST_PER_1M: number = 0.75;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  AI_OUTPUT_COST_PER_1M: number = 4.5;
 }
 
 export function validateEnvironment(config: Record<string, unknown>) {
