@@ -7,6 +7,7 @@ import { RoutinesModule } from '../routines/routines.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { UsersModule } from '../users/users.module';
 import { TelegramFormattersService } from './telegram-formatters.service';
+import { TelegramController } from './telegram.controller';
 import { TelegramService } from './telegram.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { TelegramService } from './telegram.service';
     ReviewsModule,
     CheckInsModule,
   ],
+  controllers: [TelegramController],
   providers: [TelegramService, TelegramFormattersService],
   exports: [TelegramService, TelegramFormattersService],
 })

@@ -33,6 +33,16 @@ docker compose up --build
 
 Set `TELEGRAM_BOT_ENABLED=true` and `TELEGRAM_BOT_TOKEN=<token>` to launch the bot.
 
+For temporary webhook testing through a tunnel such as `tmole 3000`, set:
+
+```bash
+PROD_LINK=https://your-temporary-tmole-link
+```
+
+When `PROD_LINK` is present, the app registers Telegram webhook mode at
+`$PROD_LINK/telegram/webhook`. When `PROD_LINK` is empty, the app uses Telegraf
+long polling.
+
 ## Telegram Commands
 
 - `/start` registers the Telegram user and opens the dashboard.

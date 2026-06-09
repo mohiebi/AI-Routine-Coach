@@ -29,6 +29,10 @@ export class EnvironmentVariables {
   TELEGRAM_BOT_TOKEN?: string;
 
   @IsOptional()
+  @IsString()
+  PROD_LINK?: string;
+
+  @IsOptional()
   @IsBooleanString()
   TELEGRAM_BOT_ENABLED?: string;
 

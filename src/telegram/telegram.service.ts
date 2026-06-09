@@ -3,10 +3,12 @@ import {
   Logger,
   OnModuleDestroy,
   OnModuleInit,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RoutineFrequency, TaskStatus, WeekStartDay } from '@prisma/client';
 import { Context, Markup, Telegraf } from 'telegraf';
+import { Update } from 'telegraf/types';
 import { CheckInsService } from '../check-ins/check-ins.service';
 import { GoalsService } from '../goals/goals.service';
 import { ProgressService } from '../progress/progress.service';
@@ -20,6 +22,7 @@ import { TelegramFormattersService } from './telegram-formatters.service';
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot?: Telegraf<Context>;
+  private pollingStarted = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -45,12 +48,46 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot = new Telegraf(token);
     this.registerHandlers(this.bot);
-    await this.bot.launch();
-    this.logger.log('Telegram bot launched');
+    const prodLink = this.normalizeProdLink(
+      this.configService.get<string>('PROD_LINK'),
+    );
+
+    if (prodLink) {
+      const webhookUrl = `${prodLink}/telegram/webhook`;
+      await this.bot.telegram.setWebhook(webhookUrl);
+      this.logger.log(`Telegram webhook registered at ${webhookUrl}`);
+      return;
+    }
+
+    await this.bot.telegram.deleteWebhook();
+    void this.bot
+      .launch()
+      .then(() => {
+        this.pollingStarted = true;
+        this.logger.log('Telegram bot launched with long polling');
+      })
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unknown Telegram launch error';
+        this.logger.error(`Telegram bot failed to launch: ${message}`);
+      });
   }
 
   onModuleDestroy() {
-    this.bot?.stop('NestJS shutdown');
+    if (this.pollingStarted) {
+      this.bot?.stop('NestJS shutdown');
+    }
+  }
+
+  async handleWebhookUpdate(update: unknown) {
+    if (!this.bot) {
+      throw new ServiceUnavailableException('Telegram bot is not initialized');
+    }
+
+    await this.bot.handleUpdate(update as Update);
+    return { ok: true };
   }
 
   async sendMessage(
@@ -271,5 +308,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       }
       return acc;
     }, {});
+  }
+
+  private normalizeProdLink(prodLink?: string) {
+    if (!prodLink) return undefined;
+    return prodLink.trim().replace(/\/+$/, '');
   }
 }
