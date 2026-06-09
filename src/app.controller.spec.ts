@@ -15,8 +15,12 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('returns non-AI health metadata', () => {
+      expect(appController.health()).toEqual({
+        status: 'ok',
+        service: 'ai-routine-coach-phase-1',
+        aiEnabled: false,
+      });
     });
   });
 });
