@@ -1,4 +1,7 @@
 import {
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   OnModuleDestroy,
@@ -16,6 +19,7 @@ import {
 } from '@prisma/client';
 import { Context, Markup, Telegraf } from 'telegraf';
 import { Update } from 'telegraf/types';
+import { AiService } from '../ai/ai.service';
 import { CheckInsService } from '../check-ins/check-ins.service';
 import { GoalsService } from '../goals/goals.service';
 import { ProgressService } from '../progress/progress.service';
@@ -98,6 +102,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly progressService: ProgressService,
     private readonly reviewsService: ReviewsService,
     private readonly checkInsService: CheckInsService,
+    private readonly aiService: AiService,
     private readonly formatters: TelegramFormattersService,
   ) {}
 
@@ -185,6 +190,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('progress', (ctx) => this.handleProgress(ctx));
     bot.command('review', (ctx) => this.handleReview(ctx));
     bot.command('settings', (ctx) => this.handleSettings(ctx));
+    bot.command('coach', (ctx) => this.handleCoachCommand(ctx));
     bot.command('cancel', (ctx) => this.handleCancel(ctx));
 
     // Persistent reply keyboard
@@ -220,6 +226,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.action(/^goal:archive:(.+)$/, (ctx) => this.handleGoalArchive(ctx));
     bot.action(/^goal:archive_ok:(.+)$/, (ctx) =>
       this.handleGoalArchiveConfirm(ctx),
+    );
+    bot.action(/^ai:goal_review:(.+)$/, (ctx) => this.handleAiGoalReview(ctx));
+    bot.action(/^ai:goal_breakdown:(.+)$/, (ctx) =>
+      this.handleAiGoalBreakdown(ctx),
+    );
+    bot.action(/^ai:routine_recs:(.+)$/, (ctx) =>
+      this.handleAiRoutineRecommendations(ctx),
+    );
+    bot.action(/^ai:goal_review_accept:(.+)$/, (ctx) =>
+      this.handleAiGoalReviewAccept(ctx),
+    );
+    bot.action(/^ai:routine_recs_accept_all:(.+)$/, (ctx) =>
+      this.handleAiRoutineRecommendationsAcceptAll(ctx),
     );
 
     // Routine creation
@@ -271,6 +290,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     // Settings
     bot.action(/^settings:(.+)$/, (ctx) => this.handleSettingsAction(ctx));
+    bot.action(/^ai:weekly:(.+)$/, (ctx) => this.handleAiWeeklyCoach(ctx));
+    bot.action('ai:progress', (ctx) => this.handleAiProgressInsights(ctx));
+    bot.action('ai:optimize_routines', (ctx) =>
+      this.handleAiRoutineOptimization(ctx),
+    );
 
     // Navigation shortcuts
     bot.action('view_goals', (ctx) => {
@@ -350,6 +374,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const id = goal.id;
     return Markup.inlineKeyboard([
       [Markup.button.callback('➕ Add Routine', `new_routine:${id}`)],
+      [Markup.button.callback('AI Review', `ai:goal_review:${id}`)],
+      [Markup.button.callback('AI Breakdown', `ai:goal_breakdown:${id}`)],
+      [Markup.button.callback('Suggest Routines', `ai:routine_recs:${id}`)],
       [Markup.button.callback('✏️ Edit Title', `goal:edit:title:${id}`)],
       [Markup.button.callback('✏️ Edit Description', `goal:edit:desc:${id}`)],
       [Markup.button.callback('✏️ Edit Category', `goal:edit:cat:${id}`)],
@@ -491,6 +518,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await ctx.reply(this.formatters.routines(routines), {
       ...Markup.inlineKeyboard([
         [Markup.button.callback('➕ New Routine', 'new_routine')],
+        [Markup.button.callback('Optimize Routines', 'ai:optimize_routines')],
         ...manageButtons,
       ]),
     });
@@ -731,7 +759,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handleProgress(ctx: Context) {
     const user = await this.ensureTelegramUser(ctx);
     const dashboard = await this.progressService.dashboard(user.id);
-    await ctx.reply(this.formatters.progress(dashboard));
+    await ctx.reply(
+      this.formatters.progress(dashboard),
+      Markup.inlineKeyboard([
+        [Markup.button.callback('AI Insights', 'ai:progress')],
+        [Markup.button.callback('Optimize Routines', 'ai:optimize_routines')],
+      ]),
+    );
   }
 
   private async handleReview(ctx: Context) {
@@ -740,7 +774,176 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       user.id,
       new Date(),
     );
-    await ctx.reply(this.formatters.weeklyReview(review));
+    await ctx.reply(
+      this.formatters.weeklyReview(review),
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Analyze My Week', `ai:weekly:${review.id}`)],
+      ]),
+    );
+  }
+
+  private async handleCoachCommand(ctx: Context) {
+    const user = await this.ensureTelegramUser(ctx);
+    const text = this.commandText(ctx);
+
+    if (!text) {
+      await ctx.reply(
+        'Premium AI Coach\n\nSend a focused message like:\n/coach I keep skipping workouts\n/coach I feel overwhelmed by my routines',
+      );
+      return;
+    }
+
+    try {
+      const message = await this.aiService.coach(user.id, { message: text });
+      await ctx.reply(message.content);
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiGoalReview(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    const goalId = this.matchId(ctx);
+    if (!goalId) return;
+
+    try {
+      await ctx.reply('Reviewing your goal...');
+      const review = await this.aiService.reviewGoal(user.id, goalId);
+      await ctx.reply(
+        this.formatAiGoalReview(review),
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              'Accept Suggested Goal',
+              `ai:goal_review_accept:${review.id}`,
+            ),
+          ],
+          [Markup.button.callback('Back to Goal', `goal:manage:${goalId}`)],
+        ]),
+      );
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiGoalReviewAccept(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    const reviewId = this.matchId(ctx);
+    if (!reviewId) return;
+
+    try {
+      const goal = await this.aiService.acceptGoalReview(user.id, reviewId);
+      await ctx.reply('Suggested goal accepted.', this.goalManageMenu(goal));
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiGoalBreakdown(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    const goalId = this.matchId(ctx);
+    if (!goalId) return;
+
+    try {
+      await ctx.reply('Breaking down your goal...');
+      const breakdown = await this.aiService.breakDownGoal(user.id, goalId);
+      await ctx.reply(
+        this.formatAiGoalBreakdown(breakdown),
+        Markup.inlineKeyboard([
+          [Markup.button.callback('Suggest Routines', `ai:routine_recs:${goalId}`)],
+          [Markup.button.callback('Back to Goal', `goal:manage:${goalId}`)],
+        ]),
+      );
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiRoutineRecommendations(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    const goalId = this.matchId(ctx);
+    if (!goalId) return;
+
+    try {
+      await ctx.reply('Creating routine recommendations...');
+      const batch = await this.aiService.recommendRoutines(user.id, goalId, {});
+      await ctx.reply(
+        this.formatAiRoutineRecommendations(batch.recommendations),
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              'Accept All',
+              `ai:routine_recs_accept_all:${batch.id}`,
+            ),
+          ],
+          [Markup.button.callback('Back to Goal', `goal:manage:${goalId}`)],
+        ]),
+      );
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiRoutineRecommendationsAcceptAll(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    const batchId = this.matchId(ctx);
+    if (!batchId) return;
+
+    try {
+      const routines = await this.aiService.acceptAllRoutineRecommendations(
+        user.id,
+        batchId,
+      );
+      await ctx.reply(`${routines.length} routine(s) created from AI suggestions.`);
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiWeeklyCoach(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    const reviewId = this.matchId(ctx);
+    if (!reviewId) return;
+
+    try {
+      await ctx.reply('Analyzing your week...');
+      const coaching = await this.aiService.analyzeWeeklyReview(user.id, reviewId);
+      await ctx.reply(this.formatAiWeeklyCoaching(coaching));
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiProgressInsights(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+
+    try {
+      await ctx.reply('Generating progress insights...');
+      const insight = await this.aiService.progressInsights(user.id);
+      await ctx.reply(this.formatAiProgressInsight(insight));
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
+  }
+
+  private async handleAiRoutineOptimization(ctx: Context) {
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+
+    try {
+      await ctx.reply('Reviewing your routines...');
+      const optimization = await this.aiService.optimizeRoutines(user.id);
+      await ctx.reply(this.formatAiRoutineOptimization(optimization));
+    } catch (error) {
+      await this.replyAiError(ctx, error);
+    }
   }
 
   // ── Settings ───────────────────────────────────────────────────────────────
@@ -1322,6 +1525,196 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private formatAiGoalReview(review: {
+    clarityScore: number;
+    strengths: unknown;
+    weaknesses: unknown;
+    missingElements: unknown;
+    suggestedVersion: string;
+  }) {
+    return [
+      'AI Goal Review',
+      '',
+      `Clarity score: ${review.clarityScore}/100`,
+      '',
+      'Strengths:',
+      ...this.bullets(review.strengths),
+      '',
+      'Weaknesses:',
+      ...this.bullets(review.weaknesses),
+      '',
+      'Missing elements:',
+      ...this.bullets(review.missingElements),
+      '',
+      'Suggested version:',
+      review.suggestedVersion,
+    ].join('\n');
+  }
+
+  private formatAiGoalBreakdown(breakdown: {
+    milestones: unknown;
+    phases: unknown;
+    suggestedTimeline: unknown;
+    dependencies: unknown;
+    successIndicators: unknown;
+  }) {
+    return [
+      'AI Goal Breakdown',
+      '',
+      'Milestones:',
+      ...this.bullets(breakdown.milestones),
+      '',
+      'Phases:',
+      ...this.bullets(breakdown.phases),
+      '',
+      'Suggested timeline:',
+      ...this.bullets(breakdown.suggestedTimeline),
+      '',
+      'Dependencies:',
+      ...this.bullets(breakdown.dependencies),
+      '',
+      'Success indicators:',
+      ...this.bullets(breakdown.successIndicators),
+    ].join('\n');
+  }
+
+  private formatAiRoutineRecommendations(recommendations: unknown) {
+    const items = Array.isArray(recommendations) ? recommendations : [];
+    if (items.length === 0) {
+      return 'No routine recommendations were generated.';
+    }
+
+    return [
+      'AI Routine Recommendations',
+      '',
+      ...items.map((item, index) => {
+        const routine = item as Record<string, unknown>;
+        return [
+          `${index + 1}. ${routine.title ?? 'Untitled routine'}`,
+          `   ${routine.frequency ?? 'DAILY'} x${routine.targetCount ?? 1}, ${routine.estimatedDuration ?? '?'} min`,
+          `   ${routine.description ?? ''}`,
+          `   Why: ${routine.whyItMatters ?? ''}`,
+        ].join('\n');
+      }),
+      '',
+      'Nothing is created until you accept the suggestions.',
+    ].join('\n');
+  }
+
+  private formatAiWeeklyCoaching(coaching: {
+    wins: unknown;
+    challenges: unknown;
+    insights: unknown;
+    recommendations: unknown;
+  }) {
+    return [
+      'AI Weekly Coach',
+      '',
+      'Wins:',
+      ...this.bullets(coaching.wins),
+      '',
+      'Challenges:',
+      ...this.bullets(coaching.challenges),
+      '',
+      'Insights:',
+      ...this.bullets(coaching.insights),
+      '',
+      'Recommendations:',
+      ...this.bullets(coaching.recommendations),
+    ].join('\n');
+  }
+
+  private formatAiProgressInsight(insight: {
+    summary: string;
+    insights: unknown;
+    opportunities: unknown;
+    risks: unknown;
+  }) {
+    return [
+      'AI Progress Insights',
+      '',
+      insight.summary,
+      '',
+      'Insights:',
+      ...this.bullets(insight.insights),
+      '',
+      'Opportunities:',
+      ...this.bullets(insight.opportunities),
+      '',
+      'Risks:',
+      ...this.bullets(insight.risks),
+    ].join('\n');
+  }
+
+  private formatAiRoutineOptimization(optimization: { suggestions: unknown }) {
+    const suggestions = Array.isArray(optimization.suggestions)
+      ? optimization.suggestions
+      : [];
+
+    if (suggestions.length === 0) {
+      return 'No routine optimization suggestions were generated.';
+    }
+
+    return [
+      'AI Routine Optimization',
+      '',
+      ...suggestions.map((item, index) => {
+        const suggestion = item as Record<string, unknown>;
+        return [
+          `${index + 1}. ${suggestion.action ?? 'SUGGESTION'}`,
+          `   Routine: ${suggestion.routineTitle ?? 'New or general routine'}`,
+          `   Suggestion: ${suggestion.suggestion ?? ''}`,
+          `   Reason: ${suggestion.reason ?? ''}`,
+        ].join('\n');
+      }),
+      '',
+      'These are suggestions only. Edit routines manually when you approve one.',
+    ].join('\n');
+  }
+
+  private bullets(value: unknown) {
+    const items = Array.isArray(value) ? value : [];
+    if (items.length === 0) {
+      return ['- None'];
+    }
+    return items.map((item) => `- ${String(item)}`);
+  }
+
+  private commandText(ctx: Context) {
+    const message = ctx.message;
+    if (!message || !('text' in message)) {
+      return '';
+    }
+    return message.text.replace(/^\/coach(?:@\w+)?\s*/i, '').trim();
+  }
+
+  private async replyAiError(ctx: Context, error: unknown) {
+    if (error instanceof ForbiddenException) {
+      await ctx.reply(
+        'This is a Premium AI feature. Your goals, routines, tasks, reviews, and tracking still work on the Free plan.',
+      );
+      return;
+    }
+
+    if (
+      error instanceof HttpException &&
+      error.getStatus() === HttpStatus.TOO_MANY_REQUESTS
+    ) {
+      await ctx.reply('You have reached the usage limit for this AI feature.');
+      return;
+    }
+
+    if (error instanceof ServiceUnavailableException) {
+      await ctx.reply(
+        'AI coaching is temporarily unavailable. Your routine tracking is still working normally.',
+      );
+      return;
+    }
+
+    this.logger.error(error);
+    await ctx.reply('AI coaching could not complete that request right now.');
+  }
 
   private async ack(ctx: Context) {
     if (ctx.callbackQuery) {
