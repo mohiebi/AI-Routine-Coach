@@ -1323,10 +1323,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   private async ack(ctx: Context) {
-    if ('answerCbQuery' in ctx) {
-      await (
-        ctx as Context & { answerCbQuery: () => Promise<void> }
-      ).answerCbQuery();
+    if (ctx.callbackQuery) {
+      await ctx.answerCbQuery();
     }
   }
 
