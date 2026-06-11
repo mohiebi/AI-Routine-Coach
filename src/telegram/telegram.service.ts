@@ -113,6 +113,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot = new Telegraf(token);
     this.registerHandlers(this.bot);
+    this.bot.catch((error) => {
+      this.logger.error(
+        `Unhandled Telegram bot error: ${this.errorMessage(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    });
     const prodLink = this.normalizeProdLink(
       this.configService.get<string>('PROD_LINK'),
     );
@@ -144,8 +150,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async handleWebhookUpdate(update: unknown, _secretToken?: string) {
     if (!this.bot) throw new ServiceUnavailableException('Telegram bot is not initialized');
-    await this.bot.handleUpdate(update as Update);
-    return { ok: true };
+    try {
+      await this.bot.handleUpdate(update as Update);
+      return { ok: true };
+    } catch (error) {
+      this.logger.error(
+        `Telegram webhook update failed: ${this.errorMessage(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      return { ok: false };
+    }
   }
 
   async sendMessage(
@@ -1223,12 +1237,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handleConversationText(ctx: Context) {
     const userId = ctx.from?.id;
     if (!userId) return;
-    const state = this.conversations.get(userId);
-    if (!state) return;
 
     const text =
       'message' in ctx && ctx.message && 'text' in ctx.message ? ctx.message.text : '';
     if (!text || text.startsWith('/')) return;
+
+    const state = this.conversations.get(userId);
+    if (!state) {
+      await this.handleMenuText(ctx, text);
+      return;
+    }
 
     const user = await this.ensureTelegramUser(ctx);
 
@@ -1510,6 +1528,43 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ── Inline selectors — creation ────────────────────────────────────────────
+
+  private async handleMenuText(ctx: Context, text: string) {
+    const normalized = text
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    switch (normalized) {
+      case 'goals':
+        await this.handleGoals(ctx);
+        break;
+      case 'routines':
+        await this.handleRoutines(ctx);
+        break;
+      case 'today':
+        await this.handleToday(ctx);
+        break;
+      case 'progress':
+        await this.handleProgress(ctx);
+        break;
+      case 'check in':
+        await this.startCheckIn(ctx);
+        break;
+      case 'review':
+        await this.handleReview(ctx);
+        break;
+      case 'premium':
+        await this.handlePremium(ctx);
+        break;
+      case 'settings':
+        await this.handleSettings(ctx);
+        break;
+      default:
+        break;
+    }
+  }
 
   private async handleCategorySelection(ctx: Context) {
     const userId = ctx.from?.id;
