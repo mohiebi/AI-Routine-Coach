@@ -8,6 +8,7 @@ import { AiModule } from './ai/ai.module';
 import { CheckInsModule } from './check-ins/check-ins.module';
 import { CheckoutModule } from './checkout/checkout.module';
 import { validateEnvironment } from './config/env.validation';
+import { isSchedulerEnabled } from './config/runtime-flags';
 import { GoalsModule } from './goals/goals.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PaymentModule } from './payments/payment.module';
@@ -21,10 +22,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { UsersModule } from './users/users.module';
 
-const schedulerEnabled =
-  process.env.SCHEDULER_ENABLED === undefined
-    ? process.env.VERCEL !== '1'
-    : process.env.SCHEDULER_ENABLED !== 'false';
+const schedulerEnabled = isSchedulerEnabled();
 
 const schedulerImports = schedulerEnabled
   ? [

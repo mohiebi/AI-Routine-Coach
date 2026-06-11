@@ -8,6 +8,7 @@ import {
   Min,
   validateSync,
 } from 'class-validator';
+import { isSchedulerEnabled } from './runtime-flags';
 
 export class EnvironmentVariables {
   @IsString()
@@ -45,6 +46,10 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   VERCEL_PROJECT_PRODUCTION_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  NOW_REGION?: string;
 
   @IsOptional()
   @IsString()
@@ -147,12 +152,7 @@ export function validateEnvironment(config: Record<string, unknown>) {
     throw new Error(errors.toString());
   }
 
-  const schedulerEnabled =
-    validatedConfig.SCHEDULER_ENABLED === undefined
-      ? validatedConfig.VERCEL !== '1'
-      : validatedConfig.SCHEDULER_ENABLED !== 'false';
-
-  if (schedulerEnabled && !validatedConfig.REDIS_HOST) {
+  if (isSchedulerEnabled(validatedConfig) && !validatedConfig.REDIS_HOST) {
     throw new Error('REDIS_HOST is required when SCHEDULER_ENABLED is true');
   }
 

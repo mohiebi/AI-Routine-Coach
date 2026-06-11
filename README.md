@@ -233,11 +233,13 @@ BullMQ registers a repeatable one-minute scheduler tick. On each tick, the worke
 
 No weekdays or review dates are hardcoded.
 
-For Vercel/serverless deploys, disable the scheduler unless running a separate worker:
+For Vercel/serverless deploys, the web function automatically disables the BullMQ scheduler because serverless functions should not run long-lived Redis workers. Keep or set this explicitly in Vercel:
 
 ```env
 SCHEDULER_ENABLED=false
 ```
+
+Run scheduled reminders/reviews from a separate worker deployment with Redis configured, or from local/Docker during development.
 
 ## Database
 
