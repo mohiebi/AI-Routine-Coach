@@ -15,11 +15,11 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('returns non-AI health metadata', () => {
+    it('returns health metadata', () => {
       expect(appController.health()).toEqual({
         status: 'ok',
         service: 'ai-routine-coach-phase-1',
-        aiEnabled: false,
+        aiEnabled: true,
       });
     });
   });

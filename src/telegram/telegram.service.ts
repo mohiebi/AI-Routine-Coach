@@ -10,14 +10,30 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Goal, Routine, RoutineFrequency, TaskStatus, WeekStartDay } from '@prisma/client';
+import {
+  CheckoutSession,
+  Coupon,
+  CryptoPayment,
+  Goal,
+  PaymentNetwork,
+  Routine,
+  RoutineFrequency,
+  StableTokenSymbol,
+  SubscriptionPlan,
+  TaskStatus,
+  WeekStartDay,
+} from '@prisma/client';
 import { Context, Markup, Telegraf } from 'telegraf';
 import { Update } from 'telegraf/types';
 import { AiFeatureGateService } from '../ai/ai-feature-gate.service';
 import { AiService } from '../ai/ai.service';
 import { CheckInsService } from '../check-ins/check-ins.service';
-import { CouponsService } from '../coupons/coupons.service';
+import { CheckoutService } from '../checkout/checkout.service';
 import { GoalsService } from '../goals/goals.service';
+import { formatToken, formatUsd } from '../payments/decimal-money';
+import { PAYMENT_CHAINS } from '../payments/payment-config';
+import { PaymentService } from '../payments/payment.service';
+import { PremiumAccessService } from '../premium/premium-access.service';
 import { ProgressService } from '../progress/progress.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { RoutinesService } from '../routines/routines.service';
@@ -41,7 +57,8 @@ type ConversationStep =
   // Monthly reflection
   | 'reflection:wentWell' | 'reflection:heldBack' | 'reflection:nextFocus'
   // Coupon
-  | 'coupon:enter'
+  | 'checkout:coupon'
+  | 'payment:tx'
   // AI coach conversation
   | 'ai_coach:active';
 
@@ -79,7 +96,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly checkInsService: CheckInsService,
     private readonly aiService: AiService,
     private readonly aiGate: AiFeatureGateService,
-    private readonly couponsService: CouponsService,
+    private readonly premiumAccessService: PremiumAccessService,
+    private readonly checkoutService: CheckoutService,
+    private readonly paymentService: PaymentService,
     private readonly formatters: TelegramFormattersService,
   ) {}
 
@@ -150,6 +169,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('progress', (ctx) => this.handleProgress(ctx));
     bot.command('review', (ctx) => this.handleReview(ctx));
     bot.command('settings', (ctx) => this.handleSettings(ctx));
+    bot.command('premium', (ctx) => this.handlePremium(ctx));
     bot.command('cancel', (ctx) => this.handleCancel(ctx));
 
     // Persistent reply keyboard
@@ -207,9 +227,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // Settings
     bot.action(/^settings:(.+)$/, (ctx) => this.handleSettingsAction(ctx));
 
-    // Premium & coupon
+    // Premium checkout
     bot.action('premium_info', (ctx) => this.handlePremium(ctx));
-    bot.action('enter_coupon', (ctx) => this.startCouponEntry(ctx));
+    bot.action(/^premium:plan:(.+)$/, (ctx) => this.handlePremiumPlan(ctx));
+    bot.action(/^checkout:pay:(.+)$/, (ctx) => this.handleCheckoutPay(ctx));
+    bot.action(/^checkout:coupon:(.+)$/, (ctx) => this.startCouponEntry(ctx));
+    bot.action(/^checkout:cancel:(.+)$/, (ctx) => this.handleCheckoutCancel(ctx));
+    bot.action(/^checkout:remove_coupon:(.+)$/, (ctx) =>
+      this.handleCheckoutRemoveCoupon(ctx),
+    );
+    bot.action(/^payment:token:([^:]+):(.+)$/, (ctx) =>
+      this.handlePaymentToken(ctx),
+    );
+    bot.action(/^payment:network:([^:]+):([^:]+):(.+)$/, (ctx) =>
+      this.handlePaymentNetwork(ctx),
+    );
+    bot.action(/^payment:verify:(.+)$/, (ctx) => this.handlePaymentVerifyRetry(ctx));
+    bot.action(/^payment:resubmit:(.+)$/, (ctx) => this.handlePaymentResubmit(ctx));
 
     // AI features
     bot.action(/^ai:review:(.+)$/, (ctx) => this.handleAiGoalReview(ctx));
@@ -239,7 +273,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handleStart(ctx: Context) {
     const user = await this.ensureTelegramUser(ctx);
     const goals = await this.goalsService.list(user.id);
-    await ctx.reply(this.formatters.dashboard(goals), MAIN_KEYBOARD);
+    const isPremium = await this.premiumAccessService.hasActivePremium(user.id);
+    await ctx.reply(this.formatters.dashboard(goals, isPremium), {
+      parse_mode: 'Markdown',
+      ...MAIN_KEYBOARD,
+    });
   }
 
   private async handleHelp(ctx: Context) {
@@ -703,30 +741,49 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handlePremium(ctx: Context) {
     await this.ack(ctx);
     const user = await this.ensureTelegramUser(ctx);
-    const isPremium = await this.aiGate.isPremium(user.id);
+    const entitlement = await this.premiumAccessService.getActiveEntitlement(
+      user.id,
+    );
 
-    if (isPremium) {
-      await ctx.reply(this.formatters.premiumActive(), {
+    if (entitlement) {
+      await ctx.reply(this.formatters.premiumActive(entitlement.expiresAt), {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('🤖 Open AI Coach', 'ai:coach')],
+          [
+            Markup.button.callback('💬 AI Coach', 'ai:coach'),
+            Markup.button.callback('📊 AI Insights', 'ai:insights'),
+          ],
+          [Markup.button.callback('🔧 AI Optimise Routines', 'ai:optimize')],
         ]),
       });
-    } else {
-      await ctx.reply(this.formatters.premiumUpgrade(), {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('Activate with Coupon Code', 'enter_coupon')],
-        ]),
-      });
+      return;
     }
+
+    const plans = await this.checkoutService.listPlans();
+    await ctx.reply(this.formatters.premiumPitch(plans), {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        ...plans.map((plan) => [
+          Markup.button.callback(
+            `${plan.name} — ${formatUsd(plan.priceUsd)}`,
+            `premium:plan:${plan.code}`,
+          ),
+        ]),
+        [Markup.button.callback('Back', 'cancel')],
+      ]),
+    });
   }
 
   private async startCouponEntry(ctx: Context) {
     const userId = ctx.from?.id;
     if (!userId) return;
     await this.ack(ctx);
-    this.conversations.set(userId, { step: 'coupon:enter', data: {} });
+    const checkoutId = this.matchId(ctx);
+    if (!checkoutId) return;
+    this.conversations.set(userId, {
+      step: 'checkout:coupon',
+      data: { checkoutId },
+    });
     await ctx.reply(
       'Enter your coupon code:',
       Markup.inlineKeyboard([CANCEL_ROW]),
@@ -734,6 +791,189 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ── AI — Goal features ─────────────────────────────────────────────────────
+
+  private async handlePremiumPlan(ctx: Context) {
+    const planCode = this.matchId(ctx);
+    if (!planCode) return;
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    try {
+      const checkout = await this.checkoutService.createCheckout(user.id, planCode);
+      await this.sendCheckout(ctx, checkout);
+    } catch (error) {
+      await ctx.reply(this.errorMessage(error));
+    }
+  }
+
+  private async handleCheckoutCancel(ctx: Context) {
+    const checkoutId = this.matchId(ctx);
+    if (!checkoutId) return;
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    await this.checkoutService.cancelCheckout(checkoutId, user.id);
+    await ctx.reply('Checkout cancelled.', MAIN_KEYBOARD);
+  }
+
+  private async handleCheckoutRemoveCoupon(ctx: Context) {
+    const checkoutId = this.matchId(ctx);
+    if (!checkoutId) return;
+    await this.ack(ctx);
+    try {
+      const user = await this.ensureTelegramUser(ctx);
+      const checkout = await this.checkoutService.removeCoupon(checkoutId, user.id);
+      await this.sendCheckout(ctx, checkout);
+    } catch (error) {
+      await ctx.reply(this.errorMessage(error));
+    }
+  }
+
+  private async handleCheckoutPay(ctx: Context) {
+    const checkoutId = this.matchId(ctx);
+    if (!checkoutId) return;
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    const checkout = await this.checkoutService.getCheckoutSummary(
+      checkoutId,
+      user.id,
+    );
+    if (!checkout?.plan) {
+      await ctx.reply('Checkout not found.');
+      return;
+    }
+
+    const tokens = this.paymentService.tokensForPlan(checkout.plan.code);
+    await ctx.reply(
+      'Choose a token:',
+      Markup.inlineKeyboard([
+        tokens.map((token) =>
+          Markup.button.callback(token, `payment:token:${checkoutId}:${token}`),
+        ),
+        CANCEL_ROW,
+      ]),
+    );
+  }
+
+  private async handlePaymentToken(ctx: Context) {
+    await this.ack(ctx);
+    const match = 'match' in ctx ? (ctx.match as RegExpExecArray) : undefined;
+    if (!match) return;
+    const checkoutId = match[1];
+    const token = match[2] as StableTokenSymbol;
+    const user = await this.ensureTelegramUser(ctx);
+    const checkout = await this.checkoutService.getCheckoutSummary(
+      checkoutId,
+      user.id,
+    );
+    if (!checkout?.plan) {
+      await ctx.reply('Checkout not found.');
+      return;
+    }
+
+    const networks = this.paymentService.enabledNetworksForPlan(checkout.plan.code);
+    await ctx.reply(
+      'Choose a network:',
+      Markup.inlineKeyboard([
+        ...networks.map((network) => [
+          Markup.button.callback(
+            PAYMENT_CHAINS[network].displayName,
+            `payment:network:${checkoutId}:${token}:${network}`,
+          ),
+        ]),
+        CANCEL_ROW,
+      ]),
+    );
+  }
+
+  private async handlePaymentNetwork(ctx: Context) {
+    await this.ack(ctx);
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const match = 'match' in ctx ? (ctx.match as RegExpExecArray) : undefined;
+    if (!match) return;
+    const checkoutId = match[1];
+    const token = match[2] as StableTokenSymbol;
+    const network = match[3] as PaymentNetwork;
+
+    try {
+      await this.typing(ctx);
+      const user = await this.ensureTelegramUser(ctx);
+      const payment = await this.paymentService.createCryptoPayment(
+        user.id,
+        checkoutId,
+        token,
+        network,
+      );
+      this.conversations.set(userId, {
+        step: 'payment:tx',
+        data: { paymentId: payment.id },
+      });
+      await ctx.reply(this.formatPaymentInstructions(payment), {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([CANCEL_ROW]),
+      });
+    } catch (error) {
+      await ctx.reply(this.errorMessage(error));
+    }
+  }
+
+  private async handlePaymentVerifyRetry(ctx: Context) {
+    await this.ack(ctx);
+    const paymentId = this.matchId(ctx);
+    if (!paymentId) return;
+    try {
+      const user = await this.ensureTelegramUser(ctx);
+      await this.typing(ctx);
+      const payment = await this.paymentService.verifyPayment(user.id, paymentId);
+      await this.replyPaymentResult(ctx, user.id, payment);
+    } catch (error) {
+      await ctx.reply(this.errorMessage(error));
+    }
+  }
+
+  private async handlePaymentResubmit(ctx: Context) {
+    await this.ack(ctx);
+    const paymentId = this.matchId(ctx);
+    const userId = ctx.from?.id;
+    if (!paymentId || !userId) return;
+    this.conversations.set(userId, {
+      step: 'payment:tx',
+      data: { paymentId },
+    });
+    await ctx.reply(
+      'Please paste the correct transaction hash (TXID) below.',
+      Markup.inlineKeyboard([CANCEL_ROW]),
+    );
+  }
+
+  /** Replies with the activation celebration screen, or a verification-failed
+   * screen with retry/resubmit buttons, depending on the payment outcome. */
+  private async replyPaymentResult(
+    ctx: Context,
+    userId: string,
+    payment: CryptoPayment,
+  ) {
+    if (payment.verifiedAt) {
+      const entitlement = await this.premiumAccessService.getActiveEntitlement(userId);
+      await ctx.reply(this.formatters.premiumActivated(entitlement?.expiresAt), {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('💬 Open AI Coach', 'ai:coach')]]),
+      });
+      return;
+    }
+
+    await ctx.reply(
+      this.formatters.paymentVerificationFailed(
+        payment.verificationError ?? 'We could not find this transaction yet.',
+      ),
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Check Again', `payment:verify:${payment.id}`)],
+          [Markup.button.callback('✏️ Resubmit Tx Hash', `payment:resubmit:${payment.id}`)],
+        ]),
+      },
+    );
+  }
 
   private async handleAiGoalReview(ctx: Context) {
     const goalId = this.matchId(ctx);
@@ -930,8 +1170,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const isPremium = await this.aiGate.isPremium(user.id);
     if (!isPremium) {
       await ctx.reply(
-        'The AI Coach is a Premium feature.',
-        Markup.inlineKeyboard([[Markup.button.callback('⭐ Upgrade to Premium', 'premium_info')]]),
+        '🔒 *AI Accountability Coach* is a Premium feature.\n\nUpgrade to chat with your AI coach anytime, plus unlock AI Goal Review, Roadmaps, Insights and more.',
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('⭐ Upgrade to Premium', 'premium_info')]]),
+        },
       );
       return;
     }
@@ -958,12 +1201,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const status = (error as HttpException)?.getStatus?.();
     if (error instanceof ForbiddenException || status === HttpStatus.FORBIDDEN) {
       await ctx.reply(
-        'This AI feature requires Premium.\n\nTap the button below to upgrade.',
-        Markup.inlineKeyboard([[Markup.button.callback('⭐ View Premium', 'premium_info')]]),
+        '🔒 *This AI feature requires Premium.*\n\nTap below to see plans and unlock the full AI toolkit.',
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('⭐ View Premium', 'premium_info')]]),
+        },
       );
     } else if (status === HttpStatus.TOO_MANY_REQUESTS) {
       await ctx.reply(
-        'Monthly AI limit reached for this feature.\n\nLimits reset on the 1st of each month.',
+        '⏳ *Monthly AI limit reached* for this feature.\n\nLimits reset on the 1st of each month.',
+        { parse_mode: 'Markdown' },
       );
     } else {
       this.logger.error('AI feature error', error);
@@ -987,14 +1234,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     switch (state.step) {
       // ── Coupon ─────────────────────────────────────────────────────────────
-      case 'coupon:enter': {
+      case 'checkout:coupon': {
         try {
-          await this.couponsService.redeemCoupon(user.id, text);
+          await this.typing(ctx);
+          const checkout = await this.checkoutService.applyCoupon(
+            state.data.checkoutId,
+            text,
+            user.id,
+          );
           this.conversations.delete(userId);
-          await ctx.reply(this.formatters.premiumActivated(), {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([[Markup.button.callback('🤖 Open AI Coach', 'ai:coach')]]),
-          });
+          if (checkout.completedAt) {
+            const entitlement =
+              await this.premiumAccessService.getActiveEntitlement(user.id);
+            await ctx.reply(this.formatters.premiumActivated(entitlement?.expiresAt), {
+              parse_mode: 'Markdown',
+              ...Markup.inlineKeyboard([[Markup.button.callback('💬 Open AI Coach', 'ai:coach')]]),
+            });
+          } else {
+            await this.sendCheckout(ctx, checkout);
+          }
+          break;
         } catch (e) {
           const msg = e instanceof BadRequestException ? e.message : 'Something went wrong.';
           await ctx.reply(`${msg}\n\nTry another code or tap Cancel.`, Markup.inlineKeyboard([CANCEL_ROW]));
@@ -1002,7 +1261,28 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         break;
       }
 
-      // ── AI Coach conversation ──────────────────────────────────────────────
+      // ── Crypto payment ─────────────────────────────────────────────────────
+      case 'payment:tx': {
+        try {
+          await this.paymentService.submitTxHash(
+            user.id,
+            state.data.paymentId,
+            text,
+          );
+          await ctx.reply('🔍 Checking the blockchain for your payment... this can take up to a minute.');
+          await this.typing(ctx);
+          const payment = await this.paymentService.verifyPayment(
+            user.id,
+            state.data.paymentId,
+          );
+          this.conversations.delete(userId);
+          await this.replyPaymentResult(ctx, user.id, payment);
+        } catch (e) {
+          await ctx.reply(this.errorMessage(e));
+        }
+        break;
+      }
+
       case 'ai_coach:active': {
         try {
           await this.typing(ctx);
@@ -1344,6 +1624,66 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private async sendCheckout(
+    ctx: Context,
+    checkout: CheckoutSession & { plan: SubscriptionPlan; coupon?: Coupon | null },
+  ) {
+    if (checkout.finalAmountUsd.equals(0)) {
+      // 100% coupon already completed the checkout — no payment options needed.
+      await ctx.reply(this.formatters.checkoutSummary(checkout), {
+        parse_mode: 'Markdown',
+      });
+      return;
+    }
+
+    await ctx.reply(this.formatters.checkoutSummary(checkout), {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('💳 Pay with Crypto', `checkout:pay:${checkout.id}`)],
+        [
+          Markup.button.callback(
+            checkout.coupon ? '🎟 Change Coupon' : '🎟 Apply Coupon',
+            `checkout:coupon:${checkout.id}`,
+          ),
+        ],
+        ...(checkout.coupon
+          ? [[Markup.button.callback('❌ Remove Coupon', `checkout:remove_coupon:${checkout.id}`)]]
+          : []),
+        [Markup.button.callback('Cancel', `checkout:cancel:${checkout.id}`)],
+      ]),
+    });
+  }
+
+  private formatPaymentInstructions(
+    payment: CryptoPayment & { checkoutSession?: { plan?: SubscriptionPlan } },
+  ) {
+    const planName = payment.checkoutSession?.plan?.name ?? 'Premium';
+    return [
+      `🧾 *${planName} — Pay with Crypto*`,
+      '',
+      'Send *exactly* this amount (every digit matters — it links the payment to your order):',
+      `\`${formatToken(payment.expectedAmount)} ${payment.tokenSymbol}\``,
+      '',
+      `Network: *${PAYMENT_CHAINS[payment.network].displayName}*`,
+      '',
+      'To this address:',
+      `\`${payment.receiverAddress}\``,
+      '',
+      'After sending, paste the transaction hash (TXID) here and I\'ll verify it on-chain.',
+      '',
+      '⚠️ *Important:*',
+      '• Use only the selected network and token — a different one cannot be verified automatically.',
+      '• Verification can take a minute or two while we wait for confirmations.',
+    ].join('\n');
+  }
+
+  private errorMessage(error: unknown) {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return 'Something went wrong.';
+  }
 
   private async ack(ctx: Context) {
     // callbackQuery is only present on callback_query updates (inline button taps).

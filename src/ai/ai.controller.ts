@@ -1,26 +1,16 @@
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AiService } from './ai.service';
 import {
   AcceptRoutineRecommendationsDto,
   CoachMessageDto,
   RoutineRecommendationRequestDto,
-  SetSubscriptionDto,
 } from './dto/ai-request.dto';
 
 @ApiTags('ai')
 @Controller('users/:userId/ai')
 export class AiController {
   constructor(private readonly aiService: AiService) {}
-
-  @Patch('subscription')
-  @ApiOperation({ summary: 'Set internal subscription flag for testing/admin use.' })
-  setSubscription(
-    @Param('userId') userId: string,
-    @Body() dto: SetSubscriptionDto,
-  ) {
-    return this.aiService.setSubscription(userId, dto);
-  }
 
   @Post('goals/:goalId/review')
   @ApiOperation({ summary: 'Premium: review goal quality with AI.' })

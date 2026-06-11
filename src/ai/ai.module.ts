@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { GoalsModule } from '../goals/goals.module';
+import { PremiumModule } from '../premium/premium.module';
 import { ProgressModule } from '../progress/progress.module';
 import { RoutinesModule } from '../routines/routines.module';
 import { AiController } from './ai.controller';
@@ -11,7 +12,7 @@ import { AiValidationService } from './ai-validation.service';
 import { OpenAiProvider } from './providers/openai.provider';
 
 @Module({
-  imports: [GoalsModule, RoutinesModule, ProgressModule],
+  imports: [GoalsModule, RoutinesModule, ProgressModule, PremiumModule],
   controllers: [AiController],
   providers: [
     AiService,

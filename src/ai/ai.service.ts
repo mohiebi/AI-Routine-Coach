@@ -43,7 +43,6 @@ import {
   AcceptRoutineRecommendationsDto,
   CoachMessageDto,
   RoutineRecommendationRequestDto,
-  SetSubscriptionDto,
 } from './dto/ai-request.dto';
 import {
   CoachOutputDto,
@@ -82,10 +81,6 @@ export class AiService {
     private readonly validationService: AiValidationService,
     private readonly costService: AiCostService,
   ) {}
-
-  setSubscription(userId: string, dto: SetSubscriptionDto) {
-    return this.gateService.setSubscription(userId, dto.plan, dto.status);
-  }
 
   async reviewGoal(userId: string, goalId: string) {
     const context = await this.contextService.goal(userId, goalId);

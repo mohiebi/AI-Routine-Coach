@@ -5,13 +5,17 @@ import {
   AIProgressInsight,
   AIRoutineOptimization,
   AIWeeklyCoaching,
+  CheckoutSession,
+  Coupon,
   DailyTask,
   Goal,
   MonthlyReview,
   Routine,
+  SubscriptionPlan,
   TaskStatus,
   WeeklyReview,
 } from '@prisma/client';
+import { formatUsd } from '../payments/decimal-money';
 // Local looser type so JSON-parsed recs (frequency: string) are accepted
 interface RoutineRecItem {
   title: string;
@@ -26,10 +30,13 @@ interface RoutineRecItem {
 export class TelegramFormattersService {
   dashboard(
     goals: { title: string; healthScore: number; healthStatus: string }[],
+    isPremium = false,
   ) {
     const name = 'AI Routine Coach';
+    const header = isPremium ? ['👑 *Premium Member*', ''] : [];
     if (goals.length === 0) {
       return [
+        ...header,
         `Welcome to ${name}!`,
         '',
         'You have no goals yet. Tap *Goals* in the menu below and press *New Goal* to get started.',
@@ -37,6 +44,7 @@ export class TelegramFormattersService {
     }
 
     return [
+      ...header,
       `${name} — Dashboard`,
       '',
       ...goals.map(
@@ -191,40 +199,83 @@ export class TelegramFormattersService {
 
   // ── Premium screens ─────────────────────────────────────────────────────────
 
-  premiumUpgrade() {
-    return [
-      '⭐ *Upgrade to Premium*',
+  /** Upgrade pitch shown to free users, with live plan pricing. */
+  premiumPitch(plans: SubscriptionPlan[]) {
+    const lines = [
+      '⭐ *Unlock AI Routine Coach Premium*',
       '',
-      'Unlock AI-powered coaching to supercharge your goals:',
+      'Your AI coach helps you set sharper goals, build a clear roadmap, and stay accountable every week:',
       '',
       '🤖 *AI Goal Review* — clarity score + suggested improvements',
       '🗺 *AI Roadmap* — milestones and phased breakdown',
-      '💡 *Routine Suggestions* — personalised weekly plan',
+      '💡 *Routine Suggestions* — a personalised weekly plan',
       '📊 *Progress Insights* — patterns, risks, and opportunities',
       '📖 *Weekly Coaching* — wins, challenges and action items',
       '🔧 *Routine Optimiser* — trim & improve your schedule',
       '💬 *AI Accountability Coach* — chat anytime',
+    ];
+
+    if (plans.length > 0) {
+      const best = this.bestValuePlan(plans);
+      lines.push('', '*Plans:*');
+      for (const plan of plans) {
+        const perMonth = Number(plan.priceUsd) / (plan.durationDays / 30);
+        const badge = best && plan.id === best.id ? ' 🔥 _Best value_' : '';
+        lines.push(
+          `• *${plan.name}* — ${formatUsd(plan.priceUsd)} / ${plan.durationDays} days (~${formatUsd(perMonth)}/mo)${badge}`,
+        );
+      }
+    }
+
+    lines.push(
       '',
-      'Enter your coupon code below to activate Premium for free.',
+      'Tap a plan below to continue. You can apply a coupon or pay with crypto on the next screen.',
+    );
+    return lines.join('\n');
+  }
+
+  /** Returns the plan with the lowest effective monthly cost, if more than one plan exists. */
+  private bestValuePlan(plans: SubscriptionPlan[]): SubscriptionPlan | undefined {
+    if (plans.length < 2) return undefined;
+    return plans.reduce((best, plan) => {
+      const perMonth = Number(plan.priceUsd) / (plan.durationDays / 30);
+      const bestPerMonth = Number(best.priceUsd) / (best.durationDays / 30);
+      return perMonth < bestPerMonth ? plan : best;
+    });
+  }
+
+  /** Active-member screen with days remaining and quick AI links. */
+  premiumActive(expiresAt: Date) {
+    const daysRemaining = Math.max(
+      0,
+      Math.ceil((expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+    );
+    return [
+      '👑 *You are a Premium member!*',
+      '',
+      `Your access is active for *${daysRemaining} more day${daysRemaining === 1 ? '' : 's'}* (until ${expiresAt.toISOString().slice(0, 10)}).`,
+      '',
+      '*Your AI toolkit:*',
+      '🤖 AI Goal Review & Roadmap — open any goal in 📋 Goals',
+      '💡 Routine Suggestions — open any goal in 📋 Goals',
+      '🔧 Routine Optimiser — open 🔄 Routines',
+      '📊 Progress Insights — open 📊 Progress',
+      '📖 Weekly Coaching — open 📖 Review',
+      '💬 AI Accountability Coach — tap a button below',
     ].join('\n');
   }
 
-  premiumActive() {
-    return [
-      '⭐ *You are on Premium!*',
-      '',
-      'All AI features are unlocked. Enjoy your coaching experience.',
-      '',
-      'Use the buttons on Goals, Routines, and Progress screens to access AI tools,',
-      'or tap *Open AI Coach* to chat directly.',
-    ].join('\n');
-  }
-
-  premiumActivated() {
-    return [
+  /** Celebration screen shown right after a coupon or crypto payment activates Premium. */
+  premiumActivated(expiresAt?: Date) {
+    const lines = [
       '🎉 *Premium Activated!*',
       '',
       'Welcome to AI Routine Coach Premium.',
+    ];
+    if (expiresAt) {
+      lines.push(`Active until *${expiresAt.toISOString().slice(0, 10)}*.`);
+    }
+    lines.push(
       '',
       'All AI features are now available:',
       '• Tap any goal to see AI Review and Roadmap',
@@ -232,6 +283,48 @@ export class TelegramFormattersService {
       '• Tap 📖 Review → AI Weekly Coaching',
       '• Tap 🔄 Routines → AI Optimise',
       '• Tap *Open AI Coach* below to start chatting',
+    );
+    return lines.join('\n');
+  }
+
+  /** Checkout summary with coupon savings and an expiry countdown. */
+  checkoutSummary(
+    checkout: CheckoutSession & { plan: SubscriptionPlan; coupon?: Coupon | null },
+  ) {
+    const lines = [`🧾 *${checkout.plan.name}*`, ''];
+
+    if (checkout.coupon && checkout.discountAmountUsd.greaterThan(0)) {
+      lines.push(`Price: ${formatUsd(checkout.originalAmountUsd)}`);
+      lines.push(
+        `Coupon *${checkout.coupon.code}*: -${formatUsd(checkout.discountAmountUsd)} (-${checkout.coupon.discountPercent}%)`,
+      );
+      lines.push(`*You pay: ${formatUsd(checkout.finalAmountUsd)}*`);
+    } else {
+      lines.push(`*Price: ${formatUsd(checkout.originalAmountUsd)}*`);
+    }
+
+    if (checkout.finalAmountUsd.equals(0)) {
+      lines.push('', '✅ Fully covered by your coupon — Premium is now active!');
+    } else {
+      const minutesLeft = Math.max(
+        0,
+        Math.round((checkout.expiresAt.getTime() - Date.now()) / 60000),
+      );
+      lines.push('', `⏳ This checkout expires in ${minutesLeft} min.`);
+    }
+
+    return lines.join('\n');
+  }
+
+  /** Shown when a submitted crypto payment could not be verified yet. */
+  paymentVerificationFailed(reason: string) {
+    return [
+      '⚠️ *Payment not verified yet*',
+      '',
+      reason,
+      '',
+      'If you just sent the payment, on-chain confirmations can take a few minutes.',
+      'Tap *Check Again* to re-check the blockchain, or *Resubmit Tx Hash* if you pasted the wrong transaction.',
     ].join('\n');
   }
 

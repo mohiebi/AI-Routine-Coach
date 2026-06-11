@@ -4,11 +4,8 @@ import {
   HttpStatus,
   Injectable,
 } from '@nestjs/common';
-import {
-  AIFeature,
-  SubscriptionPlan,
-  SubscriptionStatus,
-} from '@prisma/client';
+import { AIFeature } from '@prisma/client';
+import { PremiumAccessService } from '../premium/premium-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const DEFAULT_LIMITS: Record<AIFeature, number> = {
@@ -24,45 +21,20 @@ const DEFAULT_LIMITS: Record<AIFeature, number> = {
 
 @Injectable()
 export class AiFeatureGateService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  async setSubscription(
-    userId: string,
-    plan: SubscriptionPlan,
-    status: SubscriptionStatus,
-  ) {
-    return this.prisma.userSubscription.upsert({
-      where: { userId },
-      create: { userId, plan, status },
-      update: { plan, status, deletedAt: null },
-    });
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly premiumAccessService: PremiumAccessService,
+  ) {}
 
   async isPremium(userId: string): Promise<boolean> {
-    const sub = await this.prisma.userSubscription.findUnique({
-      where: { userId },
-    });
-    return (
-      sub?.plan === SubscriptionPlan.PREMIUM &&
-      sub.status === SubscriptionStatus.ACTIVE &&
-      !sub.deletedAt
-    );
+    return this.premiumAccessService.hasActivePremium(userId);
   }
 
   async ensurePremium(userId: string) {
-    const subscription = await this.prisma.userSubscription.findUnique({
-      where: { userId },
-    });
-
-    if (
-      subscription?.plan !== SubscriptionPlan.PREMIUM ||
-      subscription.status !== SubscriptionStatus.ACTIVE ||
-      subscription.deletedAt
-    ) {
+    const hasPremium = await this.premiumAccessService.hasActivePremium(userId);
+    if (!hasPremium) {
       throw new ForbiddenException('This AI feature requires Premium access');
     }
-
-    return subscription;
   }
 
   async assertCanUse(userId: string, feature: AIFeature) {

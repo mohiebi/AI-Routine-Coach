@@ -100,6 +100,39 @@ export class EnvironmentVariables {
   @IsNumber()
   @Min(0)
   AI_OUTPUT_COST_PER_1M: number = 4.5;
+
+  @IsOptional()
+  @IsString()
+  PAYMENT_RECEIVER_ETHEREUM_ADDRESS?: string;
+
+  @IsOptional()
+  @IsString()
+  PAYMENT_RECEIVER_BSC_ADDRESS?: string;
+
+  @IsOptional()
+  @IsString()
+  PAYMENT_RECEIVER_ARBITRUM_ADDRESS?: string;
+
+  @IsOptional()
+  @IsBooleanString()
+  PAYMENT_CHAIN_ETHEREUM_ENABLED?: string;
+
+  @IsOptional()
+  @IsBooleanString()
+  PAYMENT_CHAIN_BSC_ENABLED?: string;
+
+  @IsOptional()
+  @IsBooleanString()
+  PAYMENT_CHAIN_ARBITRUM_ENABLED?: string;
+
+  @IsOptional()
+  @IsString()
+  ETHERSCAN_API_KEY?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  PAYMENT_CHECKOUT_EXPIRES_MINUTES: number = 30;
 }
 
 export function validateEnvironment(config: Record<string, unknown>) {

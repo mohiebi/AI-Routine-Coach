@@ -6,9 +6,12 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AiModule } from './ai/ai.module';
 import { CheckInsModule } from './check-ins/check-ins.module';
+import { CheckoutModule } from './checkout/checkout.module';
 import { validateEnvironment } from './config/env.validation';
 import { GoalsModule } from './goals/goals.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PaymentModule } from './payments/payment.module';
+import { PremiumModule } from './premium/premium.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProgressModule } from './progress/progress.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -57,6 +60,9 @@ const schedulerImports = schedulerEnabled
       },
     }),
     PrismaModule,
+    PremiumModule,
+    CheckoutModule,
+    PaymentModule,
     AiModule,
     UsersModule,
     GoalsModule,

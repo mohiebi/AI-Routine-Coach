@@ -79,6 +79,23 @@ AI_OUTPUT_COST_PER_1M=4.50
 
 `OPENAI_API_KEY` may be omitted during development. The app will boot normally; premium AI requests will fail gracefully.
 
+Premium checkout and crypto payment verification:
+
+```env
+PAYMENT_RECEIVER_ETHEREUM_ADDRESS=
+PAYMENT_RECEIVER_ARBITRUM_ADDRESS=
+PAYMENT_RECEIVER_BSC_ADDRESS=
+
+PAYMENT_CHAIN_ETHEREUM_ENABLED=true
+PAYMENT_CHAIN_ARBITRUM_ENABLED=true
+PAYMENT_CHAIN_BSC_ENABLED=false
+
+ETHERSCAN_API_KEY=
+PAYMENT_CHECKOUT_EXPIRES_MINUTES=30
+```
+
+Receiver wallet addresses are always read from environment variables. BSC is present in the chain/token configuration, but disabled by default because Etherscan BSC access may require a paid tier. With the default config, Monthly Premium accepts Arbitrum only; Yearly Premium accepts Arbitrum and Ethereum.
+
 ## Telegram Usage
 
 Core commands:
@@ -106,21 +123,55 @@ Premium AI buttons are available from Telegram screens:
 
 AI never creates or modifies goals/routines unless the user explicitly accepts a suggestion.
 
-## Premium Access
+Premium checkout command:
 
-Premium is currently controlled by an internal subscription flag. Use the REST endpoint for testing/admin setup:
-
-```http
-PATCH /users/:userId/ai/subscription
-Content-Type: application/json
-
-{
-  "plan": "PREMIUM",
-  "status": "ACTIVE"
-}
+```text
+/premium
 ```
 
-Free users can continue using all deterministic tracking features. Free users tapping AI buttons receive a Premium message.
+Free users who tap an AI button are shown the Premium upgrade flow. Coupons are optional and secondary; the user can pay without entering a coupon.
+
+## Premium Access
+
+Premium is controlled by `PremiumEntitlement`, not by a user flag. Free users can continue using all deterministic tracking features; only AI features require an active entitlement.
+
+Available plans are seeded into `SubscriptionPlan`:
+
+- `PREMIUM_MONTHLY`: $10, 30 days, Arbitrum, USDT/USDC.
+- `PREMIUM_YEARLY`: $99, 365 days, Arbitrum/Ethereum, USDT/USDC.
+
+Activation rules:
+
+- A 100% coupon completes the checkout and activates premium immediately.
+- A partial coupon recalculates the payable amount, then the user pays the remaining amount in crypto.
+- A submitted TXID never activates premium by itself. The app verifies the EVM token transfer before creating or extending the entitlement.
+- Existing active premium is extended from the current expiry; otherwise the new entitlement starts immediately.
+
+After migrations, seed the plans:
+
+```bash
+npx prisma db seed
+```
+
+Payment verification uses Etherscan API V2 and checks receipt success, ERC20 `Transfer` logs, token contract, receiver wallet, amount, duplicate TXID, and chain confirmations.
+
+## Checkout REST Endpoints
+
+Plan and checkout endpoints:
+
+- `GET /users/:userId/premium`
+- `GET /users/:userId/premium/plans`
+- `POST /users/:userId/checkouts`
+- `GET /users/:userId/checkouts/:checkoutId`
+- `POST /users/:userId/checkouts/:checkoutId/coupon`
+- `DELETE /users/:userId/checkouts/:checkoutId/coupon`
+- `POST /users/:userId/checkouts/:checkoutId/cancel`
+
+Payment endpoints:
+
+- `POST /users/:userId/checkouts/:checkoutId/payments`
+- `POST /users/:userId/payments/:paymentId/tx`
+- `POST /users/:userId/payments/:paymentId/verify`
 
 ## AI REST Endpoints
 
@@ -160,6 +211,9 @@ The codebase is organized by business capability:
 - `src/scheduler` BullMQ repeatable scheduler
 - `src/notifications` notification audit log
 - `src/prisma` Prisma lifecycle service
+- `src/premium` entitlement source of truth for paid access
+- `src/checkout` plan checkout and coupon totals
+- `src/payments` EVM stablecoin payment creation and verification
 - `src/ai` isolated premium AI layer
 - `src/ai/ports` future AI provider interfaces
 
