@@ -27,7 +27,7 @@ export function isSchedulerEnabled(env: SchedulerEnv = process.env) {
 
   const configured = envString(env.SCHEDULER_ENABLED);
   if (configured === undefined) {
-    return true;
+    return Boolean(envString(env.REDIS_HOST));
   }
 
   return configured.toLowerCase() !== 'false';

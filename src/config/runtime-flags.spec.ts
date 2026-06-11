@@ -19,6 +19,10 @@ describe('runtime flags', () => {
   it('uses SCHEDULER_ENABLED outside Vercel', () => {
     expect(isSchedulerEnabled({ SCHEDULER_ENABLED: 'false' })).toBe(false);
     expect(isSchedulerEnabled({ SCHEDULER_ENABLED: 'true' })).toBe(true);
-    expect(isSchedulerEnabled({})).toBe(true);
+  });
+
+  it('only enables scheduler by default when Redis is configured', () => {
+    expect(isSchedulerEnabled({ REDIS_HOST: 'localhost' })).toBe(true);
+    expect(isSchedulerEnabled({})).toBe(false);
   });
 });

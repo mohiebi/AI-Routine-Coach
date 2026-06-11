@@ -1,0 +1,10 @@
+{
+  "env": {
+    "SCHEDULER_ENABLED": "false"
+  },
+  "build": {
+    "env": {
+      "SCHEDULER_ENABLED": "false"
+    }
+  }
+}
