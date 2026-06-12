@@ -1,8 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
-function planPrice(envName: string, fallback: string) {
+function planPrice(envName, fallback) {
   const raw = process.env[envName]?.trim() || fallback;
   if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
     throw new Error(`${envName} must be a positive USD amount with up to 2 decimals`);
