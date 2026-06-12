@@ -151,7 +151,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   async handleWebhookUpdate(update: unknown, _secretToken?: string) {
     if (!this.bot) throw new ServiceUnavailableException('Telegram bot is not initialized');
     try {
-      await this.bot.handleUpdate(update as Update);
+      const routedUpdate = this.rewriteMenuTextUpdate(update);
+      this.logger.log(this.telegramUpdateSummary(routedUpdate));
+      await this.bot.handleUpdate(routedUpdate as Update);
       return { ok: true };
     } catch (error) {
       this.logger.error(
@@ -160,6 +162,69 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
       return { ok: false };
     }
+  }
+
+  private rewriteMenuTextUpdate(update: unknown) {
+    if (!this.isRecord(update)) {
+      return update;
+    }
+    const message = update.message;
+    if (!this.isRecord(message) || typeof message.text !== 'string') {
+      return update;
+    }
+    if (message.text.startsWith('/')) {
+      return update;
+    }
+
+    const command = this.menuCommandForText(message.text);
+    if (!command) {
+      return update;
+    }
+
+    return {
+      ...update,
+      message: {
+        ...message,
+        text: command,
+        entities: [{ type: 'bot_command', offset: 0, length: command.length }],
+      },
+    };
+  }
+
+  private menuCommandForText(text: string) {
+    const normalized = this.normalizeMenuText(text);
+    const commandByLabel: Record<string, string> = {
+      goals: '/goals',
+      routines: '/routines',
+      today: '/today',
+      progress: '/progress',
+      'check in': '/checkin',
+      review: '/review',
+      premium: '/premium',
+      settings: '/settings',
+    };
+
+    return commandByLabel[normalized];
+  }
+
+  private telegramUpdateSummary(update: unknown) {
+    if (!this.isRecord(update)) {
+      return 'Telegram update received: non-object payload';
+    }
+    const message = this.isRecord(update.message) ? update.message : undefined;
+    const callbackQuery = this.isRecord(update.callback_query)
+      ? update.callback_query
+      : undefined;
+    const messageText =
+      message && typeof message.text === 'string' ? message.text : undefined;
+    const callbackData =
+      callbackQuery && typeof callbackQuery.data === 'string'
+        ? callbackQuery.data
+        : undefined;
+
+    return `Telegram update received: updateId=${String(
+      update.update_id ?? 'unknown',
+    )}, text=${messageText ?? 'none'}, callback=${callbackData ?? 'none'}`;
   }
 
   async sendMessage(
@@ -182,6 +247,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('today', (ctx) => this.handleToday(ctx));
     bot.command('progress', (ctx) => this.handleProgress(ctx));
     bot.command('review', (ctx) => this.handleReview(ctx));
+    bot.command('checkin', (ctx) => this.startCheckIn(ctx));
     bot.command('settings', (ctx) => this.handleSettings(ctx));
     bot.command('premium', (ctx) => this.handlePremium(ctx));
     bot.command('cancel', (ctx) => this.handleCancel(ctx));
@@ -1540,11 +1606,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   // ── Inline selectors — creation ────────────────────────────────────────────
 
   private async handleMenuText(ctx: Context, text: string) {
-    const normalized = text
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
+    const normalized = this.normalizeMenuText(text);
 
     switch (normalized) {
       case 'goals':
@@ -1770,6 +1832,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private isValidDate(text: string) {
     return /^\d{4}-\d{2}-\d{2}$/.test(text) && !isNaN(Date.parse(text));
+  }
+
+  private normalizeMenuText(text: string) {
+    return text
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
   }
 
   private async ensureTelegramUser(ctx: Context) {
