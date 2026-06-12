@@ -153,6 +153,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       const routedUpdate = this.rewriteMenuTextUpdate(update);
       this.logger.log(this.telegramUpdateSummary(routedUpdate));
+      if (await this.tryDirectCommandRoute(routedUpdate)) {
+        return { ok: true, routed: 'direct-command' };
+      }
       await this.bot.handleUpdate(routedUpdate as Update);
       return { ok: true };
     } catch (error) {
@@ -225,6 +228,218 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return `Telegram update received: updateId=${String(
       update.update_id ?? 'unknown',
     )}, text=${messageText ?? 'none'}, callback=${callbackData ?? 'none'}`;
+  }
+
+  private async tryDirectCommandRoute(update: unknown) {
+    if (!this.bot || !this.isRecord(update) || !this.isRecord(update.message)) {
+      return false;
+    }
+
+    const message = update.message;
+    if (typeof message.text !== 'string' || !message.text.startsWith('/')) {
+      return false;
+    }
+    if (!this.isRecord(message.chat) || typeof message.chat.id !== 'number') {
+      return false;
+    }
+    if (!this.isRecord(message.from) || typeof message.from.id !== 'number') {
+      return false;
+    }
+
+    const command = message.text.split(/\s+/, 1)[0].split('@', 1)[0].toLowerCase();
+    const chatId = message.chat.id;
+    const user = await this.usersService.registerTelegramUser({
+      telegramId: message.from.id,
+      username:
+        typeof message.from.username === 'string' ? message.from.username : undefined,
+      firstName:
+        typeof message.from.first_name === 'string'
+          ? message.from.first_name
+          : undefined,
+      timezone: 'UTC',
+    });
+
+    switch (command) {
+      case '/start': {
+        const goals = await this.goalsService.list(user.id);
+        const isPremium = await this.premiumAccessService.hasActivePremium(user.id);
+        await this.bot.telegram.sendMessage(
+          chatId,
+          this.formatters.dashboard(goals, isPremium),
+          { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD.reply_markup },
+        );
+        return true;
+      }
+      case '/help':
+        await this.bot.telegram.sendMessage(chatId, this.formatters.help(), {
+          parse_mode: 'Markdown',
+          reply_markup: MAIN_KEYBOARD.reply_markup,
+        });
+        return true;
+      case '/goals':
+        await this.sendGoalsDirect(chatId, user.id);
+        return true;
+      case '/routines':
+        await this.sendRoutinesDirect(chatId, user.id);
+        return true;
+      case '/today':
+        await this.sendTodayDirect(chatId, user.id);
+        return true;
+      case '/progress':
+        await this.sendProgressDirect(chatId, user.id);
+        return true;
+      case '/review':
+        await this.sendReviewDirect(chatId, user.id);
+        return true;
+      case '/settings':
+        await this.bot.telegram.sendMessage(
+          chatId,
+          this.formatters.settings(user.preference as Record<string, unknown>),
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [
+                Markup.button.callback('Week: Mon', 'settings:weekStart:MONDAY'),
+                Markup.button.callback('Week: Sat', 'settings:weekStart:SATURDAY'),
+                Markup.button.callback('Week: Sun', 'settings:weekStart:SUNDAY'),
+              ],
+              [
+                Markup.button.callback('Tehran', 'settings:tz:Asia/Tehran'),
+                Markup.button.callback('UTC', 'settings:tz:UTC'),
+              ],
+              [
+                Markup.button.callback('New York', 'settings:tz:America/New_York'),
+                Markup.button.callback('London', 'settings:tz:Europe/London'),
+              ],
+              [
+                Markup.button.callback('Dubai', 'settings:tz:Asia/Dubai'),
+                Markup.button.callback('Istanbul', 'settings:tz:Europe/Istanbul'),
+              ],
+            ]),
+          },
+        );
+        return true;
+      case '/premium':
+        await this.sendPremiumDirect(chatId, user.id);
+        return true;
+      case '/cancel':
+        this.conversations.delete(message.from.id);
+        await this.bot.telegram.sendMessage(chatId, 'Cancelled. Use the menu to continue.', {
+          reply_markup: MAIN_KEYBOARD.reply_markup,
+        });
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private async sendGoalsDirect(chatId: number, userId: string) {
+    if (!this.bot) return;
+    const goals = await this.goalsService.list(userId);
+    const manageButtons = goals.map((goal) => [
+      Markup.button.callback(`⚙️ ${goal.title.slice(0, 30)}`, `goal:manage:${goal.id}`),
+    ]);
+    await this.bot.telegram.sendMessage(chatId, this.formatters.goals(goals), {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('➕ New Goal', 'new_goal')],
+        ...manageButtons,
+      ]),
+    });
+  }
+
+  private async sendRoutinesDirect(chatId: number, userId: string) {
+    if (!this.bot) return;
+    const routines = await this.routinesService.list(userId);
+    const manageButtons = routines.map((routine) => [
+      Markup.button.callback(
+        `⚙️ ${routine.title.slice(0, 30)}`,
+        `routine:manage:${routine.id}`,
+      ),
+    ]);
+    await this.bot.telegram.sendMessage(chatId, this.formatters.routines(routines), {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('➕ New Routine', 'new_routine')],
+        [Markup.button.callback('🤖 AI Optimize Routines', 'ai:optimize')],
+        ...manageButtons,
+      ]),
+    });
+  }
+
+  private async sendTodayDirect(chatId: number, userId: string) {
+    if (!this.bot) return;
+    const tasks = await this.tasksService.today(userId);
+    const buttons = tasks
+      .filter((task) => task.status === TaskStatus.PENDING)
+      .flatMap((task) => [
+        [Markup.button.callback(`✅ ${task.routine.title}`, `task:COMPLETED:${task.id}`)],
+        [
+          Markup.button.callback('⏭ Skip', `task:SKIPPED:${task.id}`),
+          Markup.button.callback('❌ Fail', `task:FAILED:${task.id}`),
+        ],
+      ]);
+    await this.bot.telegram.sendMessage(
+      chatId,
+      this.formatters.tasks(tasks),
+      buttons.length > 0 ? Markup.inlineKeyboard(buttons) : MAIN_KEYBOARD,
+    );
+  }
+
+  private async sendProgressDirect(chatId: number, userId: string) {
+    if (!this.bot) return;
+    const dashboard = await this.progressService.dashboard(userId);
+    await this.bot.telegram.sendMessage(chatId, this.formatters.progress(dashboard), {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🤖 AI Progress Insights', 'ai:insights')],
+      ]),
+    });
+  }
+
+  private async sendReviewDirect(chatId: number, userId: string) {
+    if (!this.bot) return;
+    const review =
+      (await this.reviewsService.latestWeeklyReview(userId)) ??
+      (await this.reviewsService.generateWeeklyReview(userId, new Date()));
+    await this.bot.telegram.sendMessage(chatId, this.formatters.weeklyReview(review), {
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🤖 AI Weekly Coaching', `ai:weekly:${review.id}`)],
+      ]),
+    });
+  }
+
+  private async sendPremiumDirect(chatId: number, userId: string) {
+    if (!this.bot) return;
+    const entitlement = await this.premiumAccessService.getActiveEntitlement(userId);
+    if (entitlement) {
+      await this.bot.telegram.sendMessage(
+        chatId,
+        this.formatters.premiumActive(entitlement.expiresAt),
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback('💬 AI Coach', 'ai:coach'),
+              Markup.button.callback('📊 AI Insights', 'ai:insights'),
+            ],
+            [Markup.button.callback('🔧 AI Optimise Routines', 'ai:optimize')],
+          ]),
+        },
+      );
+      return;
+    }
+
+    const plans = await this.checkoutService.listPlans();
+    await this.bot.telegram.sendMessage(chatId, this.formatters.premiumPitch(plans), {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        ...plans.map((plan) => [
+          Markup.button.callback(
+            `${plan.name} — ${formatUsd(plan.priceUsd)}`,
+            `premium:plan:${plan.code}`,
+          ),
+        ]),
+        [Markup.button.callback('Back', 'cancel')],
+      ]),
+    });
   }
 
   async sendMessage(
