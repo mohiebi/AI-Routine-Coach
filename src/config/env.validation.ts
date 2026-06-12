@@ -16,6 +16,10 @@ export class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
+  DATABASE_URL_UNPOOLED?: string;
+
+  @IsOptional()
+  @IsString()
   REDIS_HOST?: string;
 
   @IsOptional()

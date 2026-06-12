@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "prisma generate && nest build",
+    "build": "prisma migrate deploy && prisma db seed && prisma generate && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",

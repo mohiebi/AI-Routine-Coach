@@ -249,6 +249,15 @@ Run scheduled reminders/reviews from a separate worker deployment with Redis con
 
 ## Database
 
+For Neon deployments, use both connection strings:
+
+```env
+DATABASE_URL=postgresql://...-pooler.../neondb?sslmode=require
+DATABASE_URL_UNPOOLED=postgresql://.../neondb?sslmode=require
+```
+
+`DATABASE_URL` is used by the running app and can use the Neon pooler. `DATABASE_URL_UNPOOLED` is used by Prisma Migrate during deploys and should use the direct/non-pooler Neon connection.
+
 Run migrations locally:
 
 ```bash
@@ -260,6 +269,14 @@ Apply migrations in deployed environments:
 ```bash
 npm run prisma:migrate
 ```
+
+The production build command also applies migrations and re-runs the idempotent seed:
+
+```bash
+npm run build
+```
+
+This runs `prisma migrate deploy`, `prisma db seed`, `prisma generate`, and then `nest build`. In Vercel, make sure both `DATABASE_URL` and `DATABASE_URL_UNPOOLED` are available to the build environment.
 
 Generate Prisma Client:
 
