@@ -249,7 +249,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     const command = message.text.split(/\s+/, 1)[0].split('@', 1)[0].toLowerCase();
     const chatId = message.chat.id;
-    const user = await this.usersService.registerTelegramUser({
+    const telegramUser = {
       telegramId: message.from.id,
       username:
         typeof message.from.username === 'string' ? message.from.username : undefined,
@@ -258,13 +258,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           ? message.from.first_name
           : undefined,
       timezone: 'UTC',
+    };
+
+    if (command === '/start') {
+      await this.sendStartDirect(chatId, telegramUser);
+      return true;
+    }
+
+    const user = await this.usersService.registerTelegramUser({
+      ...telegramUser,
     });
 
     switch (command) {
-      case '/start': {
-        await this.sendStartDirect(chatId, user.id);
-        return true;
-      }
       case '/help':
         await this.bot.telegram.sendMessage(chatId, this.formatters.help(), {
           parse_mode: 'Markdown',
@@ -342,12 +347,31 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async sendStartDirect(chatId: number, userId: string) {
+  private async sendStartDirect(
+    chatId: number,
+    telegramUser: {
+      telegramId: number;
+      username?: string;
+      firstName?: string;
+      timezone: string;
+    },
+  ) {
     if (!this.bot) return;
 
+    await this.bot.telegram.sendMessage(
+      chatId,
+      [
+        'Welcome to AI Routine Coach!',
+        '',
+        'Use the menu below to continue.',
+      ].join('\n'),
+      { reply_markup: MAIN_KEYBOARD.reply_markup },
+    );
+
     try {
-      const goals = await this.goalsService.list(userId);
-      const isPremium = await this.premiumAccessService.hasActivePremium(userId);
+      const user = await this.usersService.registerTelegramUser(telegramUser);
+      const goals = await this.goalsService.list(user.id);
+      const isPremium = await this.premiumAccessService.hasActivePremium(user.id);
       await this.bot.telegram.sendMessage(
         chatId,
         this.formatters.dashboard(goals, isPremium),
@@ -357,15 +381,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `Telegram start dashboard failed: ${this.errorMessage(error)}`,
         error instanceof Error ? error.stack : undefined,
-      );
-      await this.bot.telegram.sendMessage(
-        chatId,
-        [
-          'Welcome to AI Routine Coach!',
-          '',
-          'Use the menu below to continue.',
-        ].join('\n'),
-        { reply_markup: MAIN_KEYBOARD.reply_markup },
       );
     }
   }
