@@ -186,7 +186,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('premium', (ctx) => this.handlePremium(ctx));
     bot.command('cancel', (ctx) => this.handleCancel(ctx));
 
-    // Persistent reply keyboard
+    // Persistent reply keyboard. Match by label so emoji encoding never blocks routing.
+    bot.hears(/\bGoals\b/i, (ctx) => this.handleGoals(ctx));
+    bot.hears(/\bRoutines\b/i, (ctx) => this.handleRoutines(ctx));
+    bot.hears(/\bToday\b/i, (ctx) => this.handleToday(ctx));
+    bot.hears(/\bProgress\b/i, (ctx) => this.handleProgress(ctx));
+    bot.hears(/\bCheck\s+In\b/i, (ctx) => this.startCheckIn(ctx));
+    bot.hears(/\bReview\b/i, (ctx) => this.handleReview(ctx));
+    bot.hears(/\bPremium\b/i, (ctx) => this.handlePremium(ctx));
+    bot.hears(/\bSettings\b/i, (ctx) => this.handleSettings(ctx));
+
+    // Legacy exact labels kept for backwards compatibility.
     bot.hears('📋 Goals', (ctx) => this.handleGoals(ctx));
     bot.hears('🔄 Routines', (ctx) => this.handleRoutines(ctx));
     bot.hears('✅ Today', (ctx) => this.handleToday(ctx));
