@@ -159,11 +159,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.bot.handleUpdate(routedUpdate as Update);
       return { ok: true };
     } catch (error) {
+      const message = this.errorMessage(error);
       this.logger.error(
-        `Telegram webhook update failed: ${this.errorMessage(error)}`,
+        `Telegram webhook update failed: ${message}`,
         error instanceof Error ? error.stack : undefined,
       );
-      return { ok: false };
+      return { ok: false, error: message };
     }
   }
 
@@ -261,13 +262,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     switch (command) {
       case '/start': {
-        const goals = await this.goalsService.list(user.id);
-        const isPremium = await this.premiumAccessService.hasActivePremium(user.id);
-        await this.bot.telegram.sendMessage(
-          chatId,
-          this.formatters.dashboard(goals, isPremium),
-          { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD.reply_markup },
-        );
+        await this.sendStartDirect(chatId, user.id);
         return true;
       }
       case '/help':
@@ -345,6 +340,34 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         ...manageButtons,
       ]),
     });
+  }
+
+  private async sendStartDirect(chatId: number, userId: string) {
+    if (!this.bot) return;
+
+    try {
+      const goals = await this.goalsService.list(userId);
+      const isPremium = await this.premiumAccessService.hasActivePremium(userId);
+      await this.bot.telegram.sendMessage(
+        chatId,
+        this.formatters.dashboard(goals, isPremium),
+        { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD.reply_markup },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Telegram start dashboard failed: ${this.errorMessage(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      await this.bot.telegram.sendMessage(
+        chatId,
+        [
+          'Welcome to AI Routine Coach!',
+          '',
+          'Use the menu below to continue.',
+        ].join('\n'),
+        { reply_markup: MAIN_KEYBOARD.reply_markup },
+      );
+    }
   }
 
   private async sendRoutinesDirect(chatId: number, userId: string) {
