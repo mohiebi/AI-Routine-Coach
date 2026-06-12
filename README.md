@@ -82,6 +82,10 @@ AI_OUTPUT_COST_PER_1M=4.50
 Premium checkout and crypto payment verification:
 
 ```env
+PREMIUM_MONTHLY_PRICE_USD=10
+PREMIUM_YEARLY_PRICE_USD=99
+COUPON_CODE_FREE=
+
 PAYMENT_RECEIVER_ETHEREUM_ADDRESS=
 PAYMENT_RECEIVER_ARBITRUM_ADDRESS=
 PAYMENT_RECEIVER_BSC_ADDRESS=
@@ -135,10 +139,10 @@ Free users who tap an AI button are shown the Premium upgrade flow. Coupons are 
 
 Premium is controlled by `PremiumEntitlement`, not by a user flag. Free users can continue using all deterministic tracking features; only AI features require an active entitlement.
 
-Available plans are seeded into `SubscriptionPlan`:
+Available plans are seeded into `SubscriptionPlan`, with prices read from `PREMIUM_MONTHLY_PRICE_USD` and `PREMIUM_YEARLY_PRICE_USD`:
 
-- `PREMIUM_MONTHLY`: $10, 30 days, Arbitrum, USDT/USDC.
-- `PREMIUM_YEARLY`: $99, 365 days, Arbitrum/Ethereum, USDT/USDC.
+- `PREMIUM_MONTHLY`: 30 days, Arbitrum, USDT/USDC.
+- `PREMIUM_YEARLY`: 365 days, Arbitrum/Ethereum, USDT/USDC.
 
 Activation rules:
 
@@ -152,6 +156,8 @@ After migrations, seed the plans:
 ```bash
 npx prisma db seed
 ```
+
+Changing plan prices in `.env` affects new checkout sessions at runtime. Run the seed again when you also want the stored `SubscriptionPlan` rows updated in the database.
 
 Payment verification uses Etherscan API V2 and checks receipt success, ERC20 `Transfer` logs, token contract, receiver wallet, amount, duplicate TXID, and chain confirmations.
 

@@ -107,6 +107,16 @@ export class EnvironmentVariables {
   AI_OUTPUT_COST_PER_1M: number = 4.5;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  PREMIUM_MONTHLY_PRICE_USD: number = 10;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  PREMIUM_YEARLY_PRICE_USD: number = 99;
+
+  @IsOptional()
   @IsString()
   PAYMENT_RECEIVER_ETHEREUM_ADDRESS?: string;
 

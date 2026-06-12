@@ -17,11 +17,18 @@ export class CheckoutService {
     private readonly premiumAccessService: PremiumAccessService,
   ) {}
 
-  listPlans() {
-    return this.prisma.subscriptionPlan.findMany({
+  async listPlans() {
+    const plans = await this.prisma.subscriptionPlan.findMany({
       where: { isActive: true, deletedAt: null },
       orderBy: { priceUsd: 'asc' },
     });
+
+    return plans
+      .map((plan) => ({
+        ...plan,
+        priceUsd: this.resolvePlanPriceUsd(plan.code, plan.priceUsd),
+      }))
+      .sort((a, b) => a.priceUsd.comparedTo(b.priceUsd));
   }
 
   async createCheckout(userId: string, planCode: string) {
@@ -31,6 +38,7 @@ export class CheckoutService {
     if (!plan) {
       throw new NotFoundException('Subscription plan not found');
     }
+    const priceUsd = this.resolvePlanPriceUsd(plan.code, plan.priceUsd);
 
     const minutes = this.configService.get<number>(
       'PAYMENT_CHECKOUT_EXPIRES_MINUTES',
@@ -42,8 +50,8 @@ export class CheckoutService {
       data: {
         userId,
         planId: plan.id,
-        originalAmountUsd: plan.priceUsd,
-        finalAmountUsd: plan.priceUsd,
+        originalAmountUsd: priceUsd,
+        finalAmountUsd: priceUsd,
         expiresAt,
       },
       include: { plan: true, coupon: true },
@@ -186,5 +194,23 @@ export class CheckoutService {
       throw new BadRequestException('Checkout has expired');
     }
     return checkout;
+  }
+
+  private resolvePlanPriceUsd(planCode: string, fallback: Prisma.Decimal) {
+    const envNameByPlan: Record<string, string> = {
+      PREMIUM_MONTHLY: 'PREMIUM_MONTHLY_PRICE_USD',
+      PREMIUM_YEARLY: 'PREMIUM_YEARLY_PRICE_USD',
+    };
+    const envName = envNameByPlan[planCode];
+    if (!envName) {
+      return fallback;
+    }
+
+    const raw = this.configService.get<string | number>(envName);
+    if (raw === undefined || raw === null || raw === '') {
+      return fallback;
+    }
+
+    return money(raw);
   }
 }

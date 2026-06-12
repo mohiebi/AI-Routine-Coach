@@ -253,7 +253,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.action(/^payment:token:([^:]+):(.+)$/, (ctx) =>
       this.handlePaymentToken(ctx),
     );
-    bot.action(/^payment:network:([^:]+):([^:]+):(.+)$/, (ctx) =>
+    bot.action(/^paynet:([^:]+):([^:]+):(.+)$/, (ctx) =>
       this.handlePaymentNetwork(ctx),
     );
     bot.action(/^payment:verify:(.+)$/, (ctx) => this.handlePaymentVerifyRetry(ctx));
@@ -890,7 +890,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         ...networks.map((network) => [
           Markup.button.callback(
             PAYMENT_CHAINS[network].displayName,
-            `payment:network:${checkoutId}:${token}:${network}`,
+            `paynet:${checkoutId}:${token}:${network}`,
           ),
         ]),
         CANCEL_ROW,
