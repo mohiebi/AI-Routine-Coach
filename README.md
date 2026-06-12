@@ -43,6 +43,7 @@ Required for the core app:
 
 ```env
 DATABASE_URL=postgresql://routine:routine@localhost:5432/routine?schema=public
+DATABASE_URL_UNPOOLED=postgresql://routine:routine@localhost:5432/routine?schema=public
 REDIS_HOST=localhost
 REDIS_PORT=6379
 TELEGRAM_BOT_ENABLED=true
@@ -247,6 +248,44 @@ SCHEDULER_ENABLED=false
 
 Run scheduled reminders/reviews from a separate worker deployment with Redis configured, or from local/Docker during development.
 
+## Vercel Deployment
+
+Recommended project settings:
+
+```text
+Framework Preset: NestJS
+Root Directory: ./
+Install Command: npm install
+Build Command: npm run build
+Output Directory: leave empty / N/A
+```
+
+Required Vercel environment variables:
+
+```env
+DATABASE_URL=postgresql://...-pooler.../neondb?channel_binding=require&sslmode=require
+DATABASE_URL_UNPOOLED=postgresql://.../neondb?sslmode=require
+SCHEDULER_ENABLED=false
+TELEGRAM_BOT_ENABLED=true
+TELEGRAM_BOT_TOKEN=
+PROD_LINK=https://your-vercel-domain.vercel.app
+```
+
+`DATABASE_URL` should be the Neon pooled connection for runtime. `DATABASE_URL_UNPOOLED` should be the Neon direct/non-pooler connection for Prisma migrations.
+
+Optional production variables:
+
+```env
+OPENAI_API_KEY=
+COUPON_CODE_FREE=
+PAYMENT_RECEIVER_ETHEREUM_ADDRESS=
+PAYMENT_RECEIVER_ARBITRUM_ADDRESS=
+PAYMENT_CHAIN_ETHEREUM_ENABLED=true
+PAYMENT_CHAIN_ARBITRUM_ENABLED=true
+PAYMENT_CHAIN_BSC_ENABLED=false
+ETHERSCAN_API_KEY=
+```
+
 ## Database
 
 For Neon deployments, use both connection strings:
@@ -287,9 +326,11 @@ npm run prisma:generate
 ## Validation
 
 ```bash
-npm run build
+npx nest build
 npm test
 ```
+
+`npm run build` is the production build command and also runs `prisma migrate deploy` plus `prisma db seed` against the configured database.
 
 Optional:
 
