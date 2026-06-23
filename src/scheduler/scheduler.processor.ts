@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType, User, UserPreference } from '@prisma/client';
+import { Markup } from 'telegraf';
 import { Job } from 'bullmq';
 import {
   addDays,
@@ -108,9 +109,14 @@ export class SchedulerProcessor extends WorkerHost {
       user.preference,
     );
     const tasks = await this.tasksRepository.listForDate(user.id, today);
+    const inspiration = this.telegramFormattersService.morningInspiration(today.getDay());
     await this.telegramService.sendMessage(
       user.telegramId,
-      `Good Morning.\n\n${this.telegramFormattersService.tasks(tasks)}`,
+      `${inspiration}\n\n*Good morning!* Here are your tasks for today.\n\n${this.telegramFormattersService.tasks(tasks)}`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback("✅ Open Today's Tasks", 'view_today')]]),
+      },
     );
     await this.notificationsService.log(
       user.id,
@@ -137,7 +143,10 @@ export class SchedulerProcessor extends WorkerHost {
     }
     await this.telegramService.sendMessage(
       user.telegramId,
-      'How was your day?\n\nReply with /checkin notes | obstacles | wins',
+      "How was your day? Tap below to log your notes, obstacles, and wins — it only takes a minute.",
+      {
+        ...Markup.inlineKeyboard([[Markup.button.callback('📝 Start Check-In', 'checkin:start')]]),
+      },
     );
     await this.notificationsService.log(
       user.id,

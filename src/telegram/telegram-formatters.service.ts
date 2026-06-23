@@ -435,6 +435,22 @@ export class TelegramFormattersService {
     return ['🔧 *AI Routine Optimisation*', '', items].join('\n');
   }
 
+  // ── Morning inspiration ──────────────────────────────────────────────────
+
+  /** Returns a short inspiring line keyed to the local day of the week (0=Sun…6=Sat). */
+  morningInspiration(dayOfWeek: number): string {
+    const messages: Record<number, string> = {
+      0: '🌅 *Sunday* — Rest is part of the process. Show up gently today and let your wins compound in the background.',
+      1: '🚀 *Monday* — A brand new week, a blank slate. The actions you take today set the tone for everything that follows.',
+      2: '🔥 *Tuesday* — Momentum is built one rep at a time. Yesterday you started — today you build on it.',
+      3: '⚡ *Wednesday* — Midweek is where discipline separates dreamers from doers. You\'ve got this.',
+      4: '🎯 *Thursday* — The finish line is in sight. One strong day here makes Friday feel like a victory lap.',
+      5: '💪 *Friday* — End the week the way you started it — with intention. Future you is grateful for today\'s effort.',
+      6: '🌿 *Saturday* — Progress doesn\'t need to be loud. Small, consistent steps on weekends are a superpower.',
+    };
+    return messages[dayOfWeek] ?? messages[1];
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   private bullets(items: string[]) {

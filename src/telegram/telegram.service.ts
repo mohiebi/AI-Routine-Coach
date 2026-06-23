@@ -277,6 +277,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.action('view_goals', (ctx) => { void ctx.answerCbQuery(); return this.handleGoals(ctx); });
     bot.action('view_routines', (ctx) => { void ctx.answerCbQuery(); return this.handleRoutines(ctx); });
     bot.action('view_today', (ctx) => { void ctx.answerCbQuery(); return this.handleToday(ctx); });
+    bot.action('checkin:start', (ctx) => this.startCheckIn(ctx));
 
     bot.action('cancel', (ctx) => this.handleCancel(ctx));
     bot.on('text', (ctx) => this.handleConversationText(ctx));
@@ -713,6 +714,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   // ── Check-in ───────────────────────────────────────────────────────────────
 
   private async startCheckIn(ctx: Context) {
+    await this.ack(ctx);
     const userId = ctx.from?.id;
     if (!userId) return;
     this.conversations.set(userId, { step: 'checkin:notes', data: {} });
