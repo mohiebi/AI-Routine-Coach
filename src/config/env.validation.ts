@@ -78,7 +78,7 @@ export class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
-  OPENAI_MODEL: string = 'gpt-5.4-mini';
+  OPENAI_MODEL: string = 'gpt-4o-mini';
 
   @IsOptional()
   @IsInt()

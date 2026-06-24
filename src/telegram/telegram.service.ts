@@ -125,7 +125,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     if (prodLink) {
       const webhookUrl = `${prodLink}/telegram/webhook`;
-      await this.bot.telegram.setWebhook(webhookUrl);
+      const certB64 = this.configService.get<string>('TELEGRAM_WEBHOOK_CERT');
+      const extra = certB64
+        ? { certificate: { source: Buffer.from(certB64, 'base64') } }
+        : {};
+      await this.bot.telegram.setWebhook(webhookUrl, extra);
       this.logger.log(`Telegram webhook registered at ${webhookUrl}`);
       return;
     }
