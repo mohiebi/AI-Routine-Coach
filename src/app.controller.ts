@@ -8,6 +8,11 @@ export class AppController {
   constructor(private readonly appService: AppService) {}
 
   @Get()
+  root() {
+    return this.appService.health();
+  }
+
+  @Get('health')
   health() {
     return this.appService.health();
   }

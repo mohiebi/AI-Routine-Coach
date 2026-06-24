@@ -1,0 +1,23 @@
+node_modules
+dist
+coverage
+
+# Never bake secrets into the image
+.env
+.env.*
+!.env.server.example
+!.env.docker.example
+
+# Git
+.git
+.gitignore
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.vscode
+.idea
+*.swp
