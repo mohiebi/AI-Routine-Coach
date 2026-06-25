@@ -59,7 +59,7 @@ services:
       DATABASE_URL: postgresql://routine:${DB_PASSWORD}@postgres:5432/routine
       REDIS_HOST: redis
     ports:
-      - "${PORT:-3000}:3000"
+      - "127.0.0.1:${PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
