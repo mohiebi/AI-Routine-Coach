@@ -23,7 +23,7 @@ export class OpenAiProvider {
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
-    this.model = this.configService.get<string>('OPENAI_MODEL', 'gpt-5.4-mini');
+    this.model = this.configService.get<string>('OPENAI_MODEL', 'gpt-4o-mini');
     this.timeoutMs = this.configService.get<number>('OPENAI_TIMEOUT_MS', 20000);
     this.maxRetries = this.configService.get<number>('OPENAI_MAX_RETRIES', 2);
     this.failureThreshold = this.configService.get<number>(
