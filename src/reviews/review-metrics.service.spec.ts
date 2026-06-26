@@ -56,6 +56,7 @@ function routine(id: string, title: string) {
     frequency: RoutineFrequency.DAILY,
     targetCount: 1,
     estimatedDuration: null,
+    endDate: null,
     isActive: true,
     currentStreak: 0,
     bestStreak: 0,

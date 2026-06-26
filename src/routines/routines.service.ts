@@ -21,6 +21,7 @@ export class RoutinesService {
       frequency: dto.frequency,
       targetCount: dto.targetCount,
       estimatedDuration: dto.estimatedDuration,
+      endDate: dto.endDate ? new Date(dto.endDate) : undefined,
     });
   }
 

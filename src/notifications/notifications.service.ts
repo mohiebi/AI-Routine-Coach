@@ -16,6 +16,13 @@ export class NotificationsService {
     });
   }
 
+  async alreadySentEver(userId: string, type: NotificationType) {
+    const count = await this.prisma.notificationLog.count({
+      where: { userId, type, deletedAt: null },
+    });
+    return count > 0;
+  }
+
   async alreadySentToday(userId: string, type: NotificationType, date: Date) {
     const start = new Date(date);
     const end = new Date(date);

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
 import { CheckInsModule } from '../check-ins/check-ins.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { CouponsModule } from '../coupons/coupons.module';
 import { GoalsModule } from '../goals/goals.module';
 import { PaymentModule } from '../payments/payment.module';
 import { PremiumModule } from '../premium/premium.module';
@@ -19,6 +20,7 @@ import { TelegramService } from './telegram.service';
     AiModule,
     PremiumModule,
     CheckoutModule,
+    CouponsModule,
     PaymentModule,
     UsersModule,
     GoalsModule,

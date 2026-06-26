@@ -49,6 +49,7 @@ enum NotificationType {
   WEEKLY_REVIEW
   MONTHLY_REVIEW
   DAILY_TASK_GENERATION
+  TRIAL_ENDING_REMINDER
 }
 
 enum AIFeature {
@@ -116,6 +117,7 @@ enum PremiumSource {
   COUPON_100
   CRYPTO_PAYMENT
   ADMIN_GRANT
+  TRIAL
 }
 
 enum PremiumEntitlementStatus {
@@ -219,6 +221,7 @@ model Routine {
   frequency          RoutineFrequency
   targetCount        Int
   estimatedDuration  Int?
+  endDate            DateTime?
   isActive           Boolean           @default(true)
   currentStreak      Int               @default(0)
   bestStreak         Int               @default(0)

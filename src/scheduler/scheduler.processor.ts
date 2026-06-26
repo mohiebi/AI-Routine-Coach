@@ -1,6 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
-import { NotificationType, User, UserPreference } from '@prisma/client';
+import { NotificationType, PremiumEntitlementStatus, PremiumSource, User, UserPreference } from '@prisma/client';
 import { Markup } from 'telegraf';
 import { Job } from 'bullmq';
 import {
@@ -10,7 +10,9 @@ import {
   localParts,
   todayInTimezone,
 } from '../common/time/timezone.util';
+import { CouponGeneratorService } from '../coupons/coupon-generator.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { TaskGenerationService } from '../tasks/task-generation.service';
 import { TasksRepository } from '../tasks/tasks.repository';
@@ -34,6 +36,8 @@ export class SchedulerProcessor extends WorkerHost {
     private readonly telegramService: TelegramService,
     private readonly telegramFormattersService: TelegramFormattersService,
     private readonly reviewsService: ReviewsService,
+    private readonly prisma: PrismaService,
+    private readonly couponGeneratorService: CouponGeneratorService,
   ) {
     super();
   }
@@ -55,6 +59,7 @@ export class SchedulerProcessor extends WorkerHost {
     await this.sendEveningCheckIn(user, today, parts.time);
     await this.sendWeeklyReview(user, today, parts.time);
     await this.sendMonthlyReview(user, today, parts.time);
+    await this.sendTrialEndingReminder(user);
   }
 
   private async generateDailyTasks(
@@ -188,6 +193,58 @@ export class SchedulerProcessor extends WorkerHost {
         weekStart: range.start.toISOString(),
         weekEnd: range.end.toISOString(),
       },
+    );
+  }
+
+  private async sendTrialEndingReminder(user: UserWithPreference) {
+    const alreadySent = await this.notificationsService.alreadySentEver(
+      user.id,
+      NotificationType.TRIAL_ENDING_REMINDER,
+    );
+    if (alreadySent) return;
+
+    const now = new Date();
+    const windowStart = new Date(now.getTime() + 6 * 24 * 60 * 60 * 1000);
+    const windowEnd = new Date(now.getTime() + 8 * 24 * 60 * 60 * 1000);
+
+    const trialEntitlement = await this.prisma.premiumEntitlement.findFirst({
+      where: {
+        userId: user.id,
+        source: PremiumSource.TRIAL,
+        status: PremiumEntitlementStatus.ACTIVE,
+        expiresAt: { gte: windowStart, lte: windowEnd },
+        deletedAt: null,
+      },
+    });
+    if (!trialEntitlement) return;
+
+    const coupon = await this.couponGeneratorService.getOrCreateTrialEndingCoupon(user.id);
+    const daysLeft = Math.ceil(
+      (trialEntitlement.expiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
+    );
+
+    await this.telegramService.sendMessage(
+      user.telegramId,
+      [
+        `⏳ *${daysLeft} days left on your free trial*`,
+        '',
+        'We hope AI Routine Coach has been useful! To keep your AI toolkit running after the trial, upgrade now with *50% off* your first payment.',
+        '',
+        `🎟 Your personal code: \`${coupon.code}\``,
+        '_Apply it at checkout — valid for your first payment only._',
+        '',
+        'Tap ⭐ Premium in the menu to choose a plan.',
+      ].join('\n'),
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('⭐ See Plans', 'premium_info')]]),
+      },
+    );
+
+    await this.notificationsService.log(
+      user.id,
+      NotificationType.TRIAL_ENDING_REMINDER,
+      { couponCode: coupon.code, daysLeft },
     );
   }
 

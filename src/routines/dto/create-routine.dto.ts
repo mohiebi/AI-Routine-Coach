@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { RoutineFrequency } from '@prisma/client';
 import {
+  IsDateString,
   IsEnum,
   IsInt,
   IsOptional,
@@ -40,4 +41,9 @@ export class CreateRoutineDto {
   @IsInt()
   @Min(1)
   estimatedDuration?: number;
+
+  @ApiPropertyOptional({ description: 'Date after which this routine is no longer active (YYYY-MM-DD). Omit for a lifetime routine.' })
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
 }

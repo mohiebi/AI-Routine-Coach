@@ -199,8 +199,56 @@ export class TelegramFormattersService {
 
   // ── Premium screens ─────────────────────────────────────────────────────────
 
+  /** Shown to brand-new users when their free 30-day trial activates. */
+  trialWelcome(expiresAt: Date) {
+    return [
+      '🎉 *Welcome to AI Routine Coach!*',
+      '',
+      'To help you get started, *Premium is on us for your first 30 days* — no card needed.',
+      '',
+      '*What you can do right now:*',
+      '• 🎯 Create your first goal with 📋 Goals',
+      '• 🔄 Build daily routines under your goal',
+      '• ✅ Check off tasks every morning',
+      '• 🤖 Try AI Goal Review on any goal',
+      '• 💬 Chat with your AI Accountability Coach',
+      '',
+      `Your free trial runs until *${expiresAt.toISOString().slice(0, 10)}*.`,
+      '',
+      'Use the menu below to explore — tap ⭐ Premium anytime to see your plan options.',
+    ].join('\n');
+  }
+
+  /** Pitch shown to users currently on a free trial. */
+  premiumTrialPitch(plans: SubscriptionPlan[], trialExpiresAt: Date, couponCode: string) {
+    const daysLeft = Math.max(0, Math.ceil((trialExpiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+    const lines = [
+      `⏳ *${daysLeft} day${daysLeft === 1 ? '' : 's'} left on your free trial*`,
+      '',
+      'Loving it so far? Lock in Premium now with an exclusive *50% off* your first payment — just for you.',
+      '',
+      `🎟 Your personal code: \`${couponCode}\``,
+      '_Apply it at checkout._',
+      '',
+    ];
+
+    if (plans.length > 0) {
+      const best = this.bestValuePlan(plans);
+      lines.push('*Plans:*');
+      for (const plan of plans) {
+        const perMonth = Number(plan.priceUsd) / (plan.durationDays / 30);
+        const badge = best && plan.id === best.id ? ' 🔥 _Best value_' : '';
+        lines.push(`• *${plan.name}* — ${formatUsd(plan.priceUsd)} / ${plan.durationDays} days (~${formatUsd(perMonth)}/mo)${badge}`);
+      }
+      lines.push('');
+    }
+
+    lines.push('Tap a plan below to upgrade and keep your AI toolkit running.');
+    return lines.join('\n');
+  }
+
   /** Upgrade pitch shown to free users, with live plan pricing. */
-  premiumPitch(plans: SubscriptionPlan[]) {
+  premiumPitch(plans: SubscriptionPlan[], loyaltyCoupon?: string) {
     const lines = [
       '⭐ *Unlock AI Routine Coach Premium*',
       '',
@@ -227,6 +275,15 @@ export class TelegramFormattersService {
       }
     }
 
+    if (loyaltyCoupon) {
+      lines.push(
+        '',
+        '🎁 *Welcome back — here\'s a loyalty gift:*',
+        `Your personal *30% off* code: \`${loyaltyCoupon}\``,
+        '_Apply it at checkout. Valid for your next renewal only._',
+      );
+    }
+
     lines.push(
       '',
       'Tap a plan below to continue. You can apply a coupon or pay with crypto on the next screen.',
@@ -245,12 +302,12 @@ export class TelegramFormattersService {
   }
 
   /** Active-member screen with days remaining and quick AI links. */
-  premiumActive(expiresAt: Date) {
+  premiumActive(expiresAt: Date, loyaltyCoupon?: string) {
     const daysRemaining = Math.max(
       0,
       Math.ceil((expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
     );
-    return [
+    const lines = [
       '👑 *You are a Premium member!*',
       '',
       `Your access is active for *${daysRemaining} more day${daysRemaining === 1 ? '' : 's'}* (until ${expiresAt.toISOString().slice(0, 10)}).`,
@@ -262,7 +319,18 @@ export class TelegramFormattersService {
       '📊 Progress Insights — open 📊 Progress',
       '📖 Weekly Coaching — open 📖 Review',
       '💬 AI Accountability Coach — tap a button below',
-    ].join('\n');
+    ];
+
+    if (loyaltyCoupon) {
+      lines.push(
+        '',
+        '🎁 *Loyalty reward:* Renew early with *30% off*.',
+        `Your personal code: \`${loyaltyCoupon}\``,
+        '_Apply it at checkout when you\'re ready to extend._',
+      );
+    }
+
+    return lines.join('\n');
   }
 
   /** Celebration screen shown right after a coupon or crypto payment activates Premium. */

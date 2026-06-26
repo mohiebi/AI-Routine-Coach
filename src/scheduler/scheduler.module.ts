@@ -1,6 +1,8 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { CouponsModule } from '../coupons/coupons.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PrismaModule } from '../prisma/prisma.module';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { TelegramModule } from '../telegram/telegram.module';
@@ -17,6 +19,8 @@ import { SchedulerProcessor } from './scheduler.processor';
     TelegramModule,
     NotificationsModule,
     ReviewsModule,
+    CouponsModule,
+    PrismaModule,
   ],
   providers: [SchedulerBootstrap, SchedulerProcessor],
 })

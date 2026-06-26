@@ -16,6 +16,7 @@ import {
   CryptoPayment,
   Goal,
   PaymentNetwork,
+  PremiumSource,
   Routine,
   RoutineFrequency,
   StableTokenSymbol,
@@ -29,11 +30,12 @@ import { AiFeatureGateService } from '../ai/ai-feature-gate.service';
 import { AiService } from '../ai/ai.service';
 import { CheckInsService } from '../check-ins/check-ins.service';
 import { CheckoutService } from '../checkout/checkout.service';
+import { CouponGeneratorService } from '../coupons/coupon-generator.service';
 import { GoalsService } from '../goals/goals.service';
 import { formatToken, formatUsd } from '../payments/decimal-money';
 import { PAYMENT_CHAINS } from '../payments/payment-config';
 import { PaymentService } from '../payments/payment.service';
-import { PremiumAccessService } from '../premium/premium-access.service';
+import { LoyaltyStatus, PremiumAccessService } from '../premium/premium-access.service';
 import { ProgressService } from '../progress/progress.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { RoutinesService } from '../routines/routines.service';
@@ -48,7 +50,7 @@ type ConversationStep =
   | 'goal_edit:title' | 'goal_edit:desc' | 'goal_edit:cat' | 'goal_edit:date'
   // Routine creation
   | 'routine:title' | 'routine:description' | 'routine:frequency'
-  | 'routine:targetCount' | 'routine:duration'
+  | 'routine:targetCount' | 'routine:duration' | 'routine:endDate'
   // Routine editing
   | 'routine_edit:title' | 'routine_edit:desc' | 'routine_edit:freq'
   | 'routine_edit:count' | 'routine_edit:dur'
@@ -99,6 +101,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly premiumAccessService: PremiumAccessService,
     private readonly checkoutService: CheckoutService,
     private readonly paymentService: PaymentService,
+    private readonly couponGeneratorService: CouponGeneratorService,
     private readonly formatters: TelegramFormattersService,
   ) {}
 
@@ -241,6 +244,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // Check-in skips
     bot.action('skip:obstacles', (ctx) => this.skipCheckInStep(ctx, 'obstacles'));
     bot.action('skip:wins', (ctx) => this.skipCheckInStep(ctx, 'wins'));
+    bot.action('desc:skip', (ctx) => this.handleDescriptionSkip(ctx));
 
     // Settings
     bot.action(/^settings:(.+)$/, (ctx) => this.handleSettingsAction(ctx));
@@ -282,6 +286,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.action('view_routines', (ctx) => { void ctx.answerCbQuery(); return this.handleRoutines(ctx); });
     bot.action('view_today', (ctx) => { void ctx.answerCbQuery(); return this.handleToday(ctx); });
     bot.action('checkin:start', (ctx) => this.startCheckIn(ctx));
+    bot.action('routine:enddate:skip', (ctx) => this.handleEndDateSkip(ctx));
 
     bot.action('cancel', (ctx) => this.handleCancel(ctx));
     bot.on('text', (ctx) => this.handleConversationText(ctx));
@@ -291,6 +296,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async handleStart(ctx: Context) {
     const user = await this.ensureTelegramUser(ctx);
+
+    // Grant a free 30-day trial to brand-new users (returns null if they already have one)
+    const trial = await this.premiumAccessService.activateTrial(user.id);
+    if (trial) {
+      await ctx.reply(this.formatters.trialWelcome(trial.expiresAt), {
+        parse_mode: 'Markdown',
+        ...MAIN_KEYBOARD,
+      });
+      return;
+    }
+
     const goals = await this.goalsService.list(user.id);
     const isPremium = await this.premiumAccessService.hasActivePremium(user.id);
     await ctx.reply(this.formatters.dashboard(goals, isPremium), {
@@ -761,36 +777,50 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handlePremium(ctx: Context) {
     await this.ack(ctx);
     const user = await this.ensureTelegramUser(ctx);
-    const entitlement = await this.premiumAccessService.getActiveEntitlement(
-      user.id,
-    );
+    const entitlement = await this.premiumAccessService.getActiveEntitlement(user.id);
+    const plans = await this.checkoutService.listPlans();
+    const planButtons = [
+      ...plans.map((plan) => [
+        Markup.button.callback(`${plan.name} — ${formatUsd(plan.priceUsd)}`, `premium:plan:${plan.code}`),
+      ]),
+      [Markup.button.callback('Back', 'cancel')],
+    ];
 
+    // Active free trial → show trial pitch with 50%-off personal coupon
+    if (entitlement && entitlement.source === PremiumSource.TRIAL) {
+      const trialCoupon = await this.couponGeneratorService.getOrCreateTrialEndingCoupon(user.id);
+      await ctx.reply(
+        this.formatters.premiumTrialPitch(plans, entitlement.expiresAt, trialCoupon.code),
+        { parse_mode: 'Markdown', ...Markup.inlineKeyboard(planButtons) },
+      );
+      return;
+    }
+
+    // Active paid membership → show active screen with 30%-off loyalty coupon for renewal
     if (entitlement) {
-      await ctx.reply(this.formatters.premiumActive(entitlement.expiresAt), {
+      const loyaltyCoupon = await this.couponGeneratorService.getOrCreateLoyaltyCoupon(user.id);
+      await ctx.reply(this.formatters.premiumActive(entitlement.expiresAt, loyaltyCoupon.code), {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [
-            Markup.button.callback('💬 AI Coach', 'ai:coach'),
-            Markup.button.callback('📊 AI Insights', 'ai:insights'),
-          ],
+          [Markup.button.callback('💬 AI Coach', 'ai:coach'), Markup.button.callback('📊 AI Insights', 'ai:insights')],
           [Markup.button.callback('🔧 AI Optimise Routines', 'ai:optimize')],
+          [Markup.button.callback('🔄 Renew with 30% off', `premium:plan:${plans[0]?.code ?? ''}`)],
         ]),
       });
       return;
     }
 
-    const plans = await this.checkoutService.listPlans();
-    await ctx.reply(this.formatters.premiumPitch(plans), {
+    // No active entitlement → check loyalty eligibility
+    const loyaltyStatus: LoyaltyStatus = await this.premiumAccessService.getLoyaltyStatus(user.id);
+    let loyaltyCouponCode: string | undefined;
+    if (loyaltyStatus === 'returning') {
+      const coupon = await this.couponGeneratorService.getOrCreateLoyaltyCoupon(user.id);
+      loyaltyCouponCode = coupon.code;
+    }
+
+    await ctx.reply(this.formatters.premiumPitch(plans, loyaltyCouponCode), {
       parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        ...plans.map((plan) => [
-          Markup.button.callback(
-            `${plan.name} — ${formatUsd(plan.priceUsd)}`,
-            `premium:plan:${plan.code}`,
-          ),
-        ]),
-        [Markup.button.callback('Back', 'cancel')],
-      ]),
+      ...Markup.inlineKeyboard(planButtons),
     });
   }
 
@@ -1402,14 +1432,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       case 'routine:title':
         state.data.title = text;
         state.step = 'routine:description';
-        await ctx.reply('New Routine — Step 2 of 5\n\nBriefly describe this routine:', Markup.inlineKeyboard([CANCEL_ROW]));
+        await ctx.reply(
+          'New Routine — Step 2 of 6\n\nBriefly describe this routine: _(optional)_',
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([[Markup.button.callback('⏭ Skip', 'desc:skip')], CANCEL_ROW]),
+          },
+        );
         break;
 
       case 'routine:description':
         state.data.description = text;
         state.step = 'routine:frequency';
         await ctx.reply(
-          'New Routine — Step 3 of 5\n\nHow often should this repeat?',
+          'New Routine — Step 3 of 6\n\nHow often should this repeat?',
           Markup.inlineKeyboard([
             [
               Markup.button.callback('Daily', 'freq:DAILY'),
@@ -1431,7 +1467,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         state.data.targetCount = String(n);
         state.step = 'routine:duration';
         await ctx.reply(
-          'New Routine — Step 5 of 5\n\nHow many minutes does this take?',
+          'New Routine — Step 5 of 6\n\nHow many minutes does this take?',
           Markup.inlineKeyboard([
             [
               Markup.button.callback('15 min', 'dur:15'),
@@ -1449,6 +1485,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       case 'routine:duration': {
         const mins = parseInt(text, 10);
         state.data.duration = isNaN(mins) ? '0' : String(Math.max(0, mins));
+        state.step = 'routine:endDate';
+        await ctx.reply(
+          'New Routine — Step 6 of 6\n\nWhen should this routine end? _(YYYY-MM-DD)_\nLeave it running forever by tapping Skip.',
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback('⏭ No end date (lifetime)', 'routine:enddate:skip')],
+              CANCEL_ROW,
+            ]),
+          },
+        );
+        break;
+      }
+
+      case 'routine:endDate': {
+        if (!this.isValidDate(text)) {
+          await ctx.reply('Please enter a valid date in YYYY-MM-DD format, or tap Skip.');
+          return;
+        }
+        state.data.endDate = text;
         await this.finalizeRoutine(ctx, user.id, state);
         break;
       }
@@ -1661,19 +1717,52 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     await this.finalizeRoutine(ctx, user.id, state);
   }
 
+  private async handleDescriptionSkip(ctx: Context) {
+    await this.ack(ctx);
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const state = this.conversations.get(userId);
+    if (!state || state.step !== 'routine:description') return;
+    state.data.description = '';
+    state.step = 'routine:frequency';
+    await ctx.reply(
+      'New Routine — Step 3 of 6\n\nHow often should this repeat?',
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('Daily', 'freq:DAILY'),
+          Markup.button.callback('Weekly', 'freq:WEEKLY'),
+          Markup.button.callback('Monthly', 'freq:MONTHLY'),
+        ],
+        CANCEL_ROW,
+      ]),
+    );
+  }
+
+  private async handleEndDateSkip(ctx: Context) {
+    await this.ack(ctx);
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const state = this.conversations.get(userId);
+    if (!state || state.step !== 'routine:endDate') return;
+    state.data.endDate = '';
+    const user = await this.ensureTelegramUser(ctx);
+    await this.finalizeRoutine(ctx, user.id, state);
+  }
+
   private async finalizeRoutine(ctx: Context, userId: string, state: ConversationState) {
     const telegramId = ctx.from?.id;
     if (telegramId) this.conversations.delete(telegramId);
     const routine = await this.routinesService.create(userId, {
       goalId: state.data.goalId,
       title: state.data.title,
-      description: state.data.description,
+      description: state.data.description || undefined,
       frequency: state.data.frequency as RoutineFrequency,
       targetCount: Number(state.data.targetCount),
       estimatedDuration:
         state.data.duration && Number(state.data.duration) > 0
           ? Number(state.data.duration)
           : undefined,
+      endDate: state.data.endDate || undefined,
     });
     await ctx.reply(
       `Routine created: "${routine.title}" — ${routine.frequency}`,
