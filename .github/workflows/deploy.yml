@@ -43,6 +43,8 @@ jobs:
             set -e
             cd ${{ secrets.APP_PATH }}
             git config --global --add safe.directory ${{ secrets.APP_PATH }}
-            git pull origin main
+            git fetch origin
+            git reset --hard origin/main
             docker compose -f docker-compose.prod.yml up -d --build
+            docker compose -f docker-compose.prod.yml exec -T app npx prisma migrate deploy
             docker compose -f docker-compose.prod.yml logs --tail=50 app
