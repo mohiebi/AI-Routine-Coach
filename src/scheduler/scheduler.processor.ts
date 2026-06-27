@@ -114,7 +114,10 @@ export class SchedulerProcessor extends WorkerHost {
       user.preference,
     );
     const tasks = await this.tasksRepository.listForDate(user.id, today);
-    const inspiration = this.telegramFormattersService.morningInspiration(today.getDay());
+    const inspiration = this.telegramFormattersService.morningInspiration(
+      today,
+      user.preference.weekStartDay,
+    );
     await this.telegramService.sendMessage(
       user.telegramId,
       `${inspiration}\n\n*Good morning!* Here are your tasks for today.\n\n${this.telegramFormattersService.tasks(tasks)}`,

@@ -252,6 +252,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // Premium checkout
     bot.action('premium_info', (ctx) => this.handlePremium(ctx));
     bot.action(/^premium:plan:(.+)$/, (ctx) => this.handlePremiumPlan(ctx));
+    bot.action(/^premium:renew:(.+)$/, (ctx) => this.handleLoyaltyRenew(ctx));
     bot.action(/^checkout:pay:(.+)$/, (ctx) => this.handleCheckoutPay(ctx));
     bot.action(/^checkout:coupon:(.+)$/, (ctx) => this.startCouponEntry(ctx));
     bot.action(/^checkout:cancel:(.+)$/, (ctx) => this.handleCheckoutCancel(ctx));
@@ -804,7 +805,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         ...Markup.inlineKeyboard([
           [Markup.button.callback('💬 AI Coach', 'ai:coach'), Markup.button.callback('📊 AI Insights', 'ai:insights')],
           [Markup.button.callback('🔧 AI Optimise Routines', 'ai:optimize')],
-          [Markup.button.callback('🔄 Renew with 30% off', `premium:plan:${plans[0]?.code ?? ''}`)],
+          [Markup.button.callback('🔄 Renew with 30% off', `premium:renew:${plans[0]?.code ?? ''}`)],
         ]),
       });
       return;
@@ -850,6 +851,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       const checkout = await this.checkoutService.createCheckout(user.id, planCode);
       await this.sendCheckout(ctx, checkout);
+    } catch (error) {
+      await ctx.reply(this.errorMessage(error));
+    }
+  }
+
+  /** Creates a checkout and auto-applies the user's loyalty coupon in one tap. */
+  private async handleLoyaltyRenew(ctx: Context) {
+    const planCode = this.matchId(ctx);
+    if (!planCode) return;
+    await this.ack(ctx);
+    const user = await this.ensureTelegramUser(ctx);
+    try {
+      await this.typing(ctx);
+      const checkout = await this.checkoutService.createCheckout(user.id, planCode);
+      const coupon = await this.couponGeneratorService.getOrCreateLoyaltyCoupon(user.id);
+      const withCoupon = await this.checkoutService.applyCoupon(
+        checkout.id,
+        coupon.code,
+        user.id,
+      );
+      await this.sendCheckout(ctx, withCoupon);
     } catch (error) {
       await ctx.reply(this.errorMessage(error));
     }
