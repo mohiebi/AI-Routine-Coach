@@ -380,11 +380,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (!goalId) return;
     await this.ack(ctx);
     const user = await this.ensureTelegramUser(ctx);
-    const goal = await this.goalsService.find(user.id, goalId);
-    await ctx.reply(
-      `Managing: "${goal.title}"\n\nWhat would you like to do?`,
-      this.goalManageMenu(goal),
-    );
+    try {
+      const goal = await this.goalsService.find(user.id, goalId);
+      await ctx.reply(
+        `Managing: "${goal.title}"\n\nWhat would you like to do?`,
+        this.goalManageMenu(goal),
+      );
+    } catch {
+      await ctx.reply('This goal no longer exists.', MAIN_KEYBOARD);
+    }
   }
 
   private async startGoalEdit(ctx: Context, field: string) {

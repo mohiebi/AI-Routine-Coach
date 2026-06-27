@@ -45,7 +45,16 @@ export class SchedulerProcessor extends WorkerHost {
   async process(job: Job) {
     if (job.name !== 'tick') return;
     const users = await this.usersRepository.listActiveWithPreferences();
-    await Promise.all(users.map((user) => this.processUser(user)));
+    const results = await Promise.allSettled(
+      users.map((user) => this.processUser(user)),
+    );
+    results.forEach((result, i) => {
+      if (result.status === 'rejected') {
+        this.logger.error(
+          `Scheduler failed for user ${users[i].id}: ${String(result.reason)}`,
+        );
+      }
+    });
   }
 
   private async processUser(user: UserWithPreference) {

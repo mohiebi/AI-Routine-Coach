@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import {
@@ -10,6 +11,7 @@ import {
   AIRoutineRecommendationStatus,
   GoalStatus,
   Prisma,
+  RoutineFrequency,
 } from '@prisma/client';
 import { GoalsService } from '../goals/goals.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -71,6 +73,8 @@ interface AiRunOptions<T extends object> {
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly goalsService: GoalsService,
@@ -118,8 +122,13 @@ export class AiService {
       },
     });
 
+    const suggestedVersion = (review.suggestedVersion as string | null)?.trim();
+    if (!suggestedVersion) {
+      throw new Error('AI review has no suggested version to apply');
+    }
+
     const goal = await this.goalsService.update(userId, review.goalId, {
-      title: review.suggestedVersion,
+      title: suggestedVersion,
     });
 
     await this.prisma.aIGoalReview.update({
@@ -205,9 +214,19 @@ export class AiService {
     const recommendations = this.readRecommendations(batch.recommendations);
     const created: any[] = [];
 
+    const validFrequencies = new Set<string>(Object.values(RoutineFrequency));
+
     for (const index of dto.recommendationIndexes) {
       const recommendation = recommendations[index];
       if (!recommendation) {
+        continue;
+      }
+
+      const frequency = String(recommendation.frequency ?? '').toUpperCase();
+      if (!validFrequencies.has(frequency)) {
+        this.logger.warn(
+          `Skipping recommendation at index ${index}: invalid frequency "${recommendation.frequency}"`,
+        );
         continue;
       }
 
@@ -215,7 +234,7 @@ export class AiService {
         goalId: batch.goalId,
         title: recommendation.title,
         description: `${recommendation.description}\n\nWhy it matters: ${recommendation.whyItMatters}`,
-        frequency: recommendation.frequency,
+        frequency: frequency as RoutineFrequency,
         targetCount: recommendation.targetCount,
         estimatedDuration: recommendation.estimatedDuration,
       });

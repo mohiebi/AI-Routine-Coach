@@ -134,8 +134,22 @@ export class CheckoutService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Re-read couponId inside the transaction so a concurrent removeCoupon
+      // call that already nulled it out is detected before we double-decrement.
+      const current = await tx.checkoutSession.findUnique({
+        where: { id: checkout.id },
+        select: { couponId: true, originalAmountUsd: true },
+      });
+      if (!current?.couponId) {
+        // Another request already removed the coupon; return current state.
+        return tx.checkoutSession.findUniqueOrThrow({
+          where: { id: checkout.id },
+          include: { plan: true, coupon: true },
+        });
+      }
+
       await tx.coupon.update({
-        where: { id: checkout.couponId! },
+        where: { id: current.couponId },
         data: { usedCount: { decrement: 1 } },
       });
 
@@ -144,7 +158,7 @@ export class CheckoutService {
         data: {
           couponId: null,
           discountAmountUsd: 0,
-          finalAmountUsd: checkout.originalAmountUsd,
+          finalAmountUsd: current.originalAmountUsd,
         },
         include: { plan: true, coupon: true },
       });
