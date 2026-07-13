@@ -663,8 +663,34 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const match = 'match' in ctx ? (ctx.match as RegExpExecArray) : undefined;
     if (!match) return;
     await this.tasksService.mark(user.id, match[2], { status: match[1] as TaskStatus });
-    await ctx.answerCbQuery('Saved');
-    await this.handleToday(ctx);
+    await ctx.answerCbQuery('✅ Saved');
+
+    // Rebuild the task list and edit the existing message in place rather than
+    // flooding the chat with a new message on every tap.
+    const tasks = await this.tasksService.today(user.id);
+    const buttons = tasks
+      .filter((t) => t.status === TaskStatus.PENDING)
+      .flatMap((task) => [
+        [Markup.button.callback(`✅ ${task.routine.title}`, `task:COMPLETED:${task.id}`)],
+        [
+          Markup.button.callback('⏭ Skip', `task:SKIPPED:${task.id}`),
+          Markup.button.callback('❌ Fail', `task:FAILED:${task.id}`),
+        ],
+      ]);
+
+    const text = this.formatters.tasks(tasks);
+    const inlineMarkup = Markup.inlineKeyboard(buttons); // empty array removes buttons
+
+    try {
+      await ctx.editMessageText(text, inlineMarkup);
+    } catch (e: unknown) {
+      // "message is not modified" (400) → already up to date, ignore
+      // "message to edit not found" → too old or deleted, fall back to new message
+      const code = (e as any)?.response?.error_code;
+      if (code !== 400) {
+        await ctx.reply(text, buttons.length > 0 ? inlineMarkup : MAIN_KEYBOARD);
+      }
+    }
   }
 
   // ── Progress & review ──────────────────────────────────────────────────────
