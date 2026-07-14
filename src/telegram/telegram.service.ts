@@ -155,10 +155,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
     const goals = await this.goalsService.list(user.id);
     const isPremium = await this.premiumAccessService.hasActivePremium(user.id);
-    await ctx.reply(this.formatters.dashboard(goals, isPremium), {
-      parse_mode: 'Markdown',
-      ...MAIN_KEYBOARD,
-    });
+    await ctx.reply(this.formatters.dashboard(goals, isPremium), MAIN_KEYBOARD);
   }
 
   private async handleHelp(ctx: Context) {
@@ -182,10 +179,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const user = await this.helper.ensureTelegramUser(ctx);
     const goals = await this.goalsService.list(user.id);
     const isPremium = await this.premiumAccessService.hasActivePremium(user.id);
-    await ctx.reply(this.formatters.dashboard(goals, isPremium), {
-      parse_mode: 'Markdown',
-      ...MAIN_KEYBOARD,
-    });
+    await ctx.reply(this.formatters.dashboard(goals, isPremium), MAIN_KEYBOARD);
   }
 
   // ── Conversation text dispatcher ───────────────────────────────────────────

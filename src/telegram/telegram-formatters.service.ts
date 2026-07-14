@@ -34,13 +34,13 @@ export class TelegramFormattersService {
     isPremium = false,
   ) {
     const name = 'AI Routine Coach';
-    const header = isPremium ? ['👑 *Premium Member*', ''] : [];
+    const header = isPremium ? ['👑 Premium Member', ''] : [];
     if (goals.length === 0) {
       return [
         ...header,
         `Welcome to ${name}!`,
         '',
-        'You have no goals yet. Tap *Goals* in the menu below and press *New Goal* to get started.',
+        'You have no goals yet. Tap Goals in the menu below and press New Goal to get started.',
       ].join('\n');
     }
 
