@@ -124,6 +124,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     bot.command('help', (ctx) => this.handleHelp(ctx));
     bot.command('cancel', (ctx) => this.handleCancel(ctx));
 
+    // Global navigation should always win, even from nested inline menus.
+    bot.action('cancel', (ctx) => this.handleCancel(ctx));
+    bot.action('main_menu', (ctx) => this.handleMainMenu(ctx));
+
     // Delegate to domain handlers (each registers its own actions + hears)
     this.goalHandler.register(bot);
     this.routineHandler.register(bot);
@@ -132,10 +136,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.premiumHandler.register(bot);
     this.aiHandler.register(bot);
     this.settingsHandler.register(bot);
-
-    // Global navigation
-    bot.action('cancel', (ctx) => this.handleCancel(ctx));
-    bot.action('main_menu', (ctx) => this.handleMainMenu(ctx));
 
     // Free-text: active conversation or reply-keyboard echo
     bot.on('text', (ctx) => this.handleConversationText(ctx));
@@ -197,6 +197,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       'message' in ctx && ctx.message && 'text' in ctx.message ? ctx.message.text : '';
     if (!text || text.startsWith('/')) return;
 
+    if (this.normalizeMenuText(text) === 'main menu') {
+      await this.handleMainMenu(ctx);
+      return;
+    }
+
     const state = this.conversations.get(userId);
     if (!state) {
       await this.handleMenuText(ctx, text);
@@ -228,13 +233,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleMenuText(ctx: Context, text: string) {
-    const normalized = text
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
+    const normalized = this.normalizeMenuText(text);
 
     switch (normalized) {
+      case 'main menu':    return this.handleMainMenu(ctx);
       case 'goals':        return this.goalHandler.handleGoals(ctx);
       case 'routines':     return this.routineHandler.handleRoutines(ctx);
       case 'today':        return this.taskHandler.handleToday(ctx);
@@ -244,6 +246,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       case 'premium':      return this.premiumHandler.handlePremium(ctx);
       case 'settings':     return this.settingsHandler.handleSettings(ctx);
     }
+  }
+
+  private normalizeMenuText(text: string) {
+    return text
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
   }
 
   private normalizeProdLink(prodLink?: string) {
